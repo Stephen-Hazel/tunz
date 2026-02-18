@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">tunz</string>
+    <string name="action_settings">Settings</string>
+    <!-- Strings used for fragments for navigation -->
+    <string name="first_fragment_label">picker</string>
+    <string name="second_fragment_label">playlist</string>
+    <string name="next">to playlist</string>
+    <string name="previous">to picker</string>
+</resources>
