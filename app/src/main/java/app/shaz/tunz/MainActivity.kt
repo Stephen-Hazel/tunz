@@ -7,11 +7,13 @@ import java.io.File
 import android.media.MediaPlayer
 import android.view.Menu
 import android.view.MenuItem
+/*
+import androidx.constraintlayout.widget.ConstraintLayout
 import android.view.ViewGroup
 import android.widget.CheckBox
+ */
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.navigation.findNavController
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.navigateUp
@@ -41,11 +43,14 @@ class MainActivity: AppCompatActivity ()
    private var ppos = 0
 
    fun next ()
-   {  mplay?.stop ()
+   {
+      Log.d ("Files", "next start")
+      mplay?.stop ()
       mplay?.reset ()
       Log.d ("Files", "song done")
       done.add (song)
 
+      Log.d ("Files", "bump ppos")
       ppos++
       if (ppos < play.size) {
          song = play [ppos]
@@ -59,7 +64,9 @@ class MainActivity: AppCompatActivity ()
 
    fun rePlay ()
    // use rand and pick to make playlist from mp3
-   {  if (mplay?.isPlaying == true)  mplay?.stop ()
+   {
+      Log.d ("Files", "rePlay start")
+      if (mplay?.isPlaying == true)  mplay?.stop ()
       mplay?.reset ()
 
       play = mutableListOf ()
@@ -75,10 +82,13 @@ class MainActivity: AppCompatActivity ()
          play.shuffle ()
       }
       ppos = 0
-     val tv: TextView = findViewById (R.id.textview_second)
-      tv.text = play.joinToString (separator = "\n")
+//      Log.d ("Files", "gonna set textview")
+//     val tv: TextView = findViewById (R.id.textview_second)
+//      Log.d ("Files", "a")
+//      tv.text = play.joinToString (separator = "\n")
+//      Log.d ("Files", "b")
 
-      if (play.isEmpty ())  return
+       if (play.isEmpty ())  return
 
       song = play [ppos]
       Log.d ("Files", "gonna play $song")
@@ -127,9 +137,15 @@ class MainActivity: AppCompatActivity ()
         val ls: Array<String> = d2.map { it.getName () }.toTypedArray ()
          ls.sort ()
          mp3.add (FNList (dr, ls.toMutableList ()))
+
+
+         if (dr != "An")  pick.add (dr)
       }
 
+      rePlay ()
+
    // init gui
+/*
      val lo = findViewById<ConstraintLayout>(R.id.pickLayout)
      val cb = CheckBox (this)
       cb.text = "rand"
@@ -157,6 +173,7 @@ class MainActivity: AppCompatActivity ()
          }
          lo.addView (cb)
       }
+*/
    }
 
    override fun onDestroy ()
