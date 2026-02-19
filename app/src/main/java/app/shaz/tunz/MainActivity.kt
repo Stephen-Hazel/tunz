@@ -11,8 +11,8 @@ import android.view.MenuItem
 import androidx.constraintlayout.widget.ConstraintLayout
 import android.view.ViewGroup
 import android.widget.CheckBox
- */
 import android.widget.TextView
+ */
 import androidx.appcompat.app.AppCompatActivity
 import androidx.navigation.findNavController
 import androidx.navigation.ui.AppBarConfiguration
@@ -139,7 +139,7 @@ class MainActivity: AppCompatActivity ()
          mp3.add (FNList (dr, ls.toMutableList ()))
 
 
-         if (dr != "An")  pick.add (dr)
+         if ((dr == "An") || (dr == "_a"))  pick.add (dr)
       }
 
       rePlay ()
