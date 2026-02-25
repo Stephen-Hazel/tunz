@@ -1,6 +1,7 @@
 package app.shaz.tunz
 
 import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Environment
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
@@ -9,6 +10,9 @@ import app.shaz.tunz.databinding.ActivityMainBinding
 import android.util.Log
 import java.io.File
 import android.media.MediaPlayer
+import android.text.Spannable
+import android.text.SpannableString
+import android.text.style.StyleSpan
 import android.view.View
 import android.widget.CheckBox
 import android.widget.LinearLayout
@@ -36,6 +40,17 @@ class MainActivity: AppCompatActivity ()
    private var song = ""
    private var ppos = 0
    private var selRow: TableRow? = null
+
+   fun fmt (fn: String): SpannableString
+   { val s = SpannableString (fn)
+     val sub = "boldsub"
+     val start = fn.indexOf (sub)
+      if (start != -1)
+         s.setSpan (StyleSpan (Typeface.BOLD), start, start + sub.length,
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+      return s
+   }
+
 
    fun next (row: Int = -1)
    {  mplay?.stop ()
@@ -128,7 +143,7 @@ Log.d ("Files", "rePlay start")
       }
 
       song = play [ppos]
-      Log.d ("Files", "gonna play $song")
+Log.d ("Files", "gonna play $song")
 
       mplay?.setDataSource ("$path/$song")
       mplay?.prepare ()
@@ -151,8 +166,8 @@ Log.d ("Files", "rePlay start")
              emptySet ())?.toMutableList () ?: mutableListOf ()
       done = p.getStringSet ("done",
              emptySet ())?.toMutableList () ?: mutableListOf ()
-      done.forEach { Log.d("Files", "done=$it") }
-      pick.forEach { Log.d("Files", "pick=$it") }
+done.forEach { Log.d("Files", "done=$it") }
+pick.forEach { Log.d("Files", "pick=$it") }
 
    // list off Music into path, mp3
       path = Environment.getExternalStorageDirectory ().toString () + "/Music"
@@ -216,8 +231,8 @@ Log.d ("Files", "rePlay start")
       mplay = null
 
    // persist vars
-      Log.d("Files", "save pref start")
-      pick.forEach { Log.d("Files", "pick=$it") }
+Log.d("Files", "save pref start")
+pick.forEach { Log.d("Files", "pick=$it") }
      val e = getSharedPreferences ("prf", MODE_PRIVATE).edit ()
       e.putBoolean   ("shuf", shuf).commit ()
       e.putStringSet ("pick", pick.toSet ()).commit ()
