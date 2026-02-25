@@ -1,5 +1,6 @@
 package app.shaz.tunz
 
+import android.graphics.Color
 import android.os.Environment
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
@@ -34,14 +35,27 @@ class MainActivity: AppCompatActivity ()
    private var play = mutableListOf<String>()
    private var song = ""
    private var ppos = 0
+   private var selRow: TableRow? = null
 
-   fun next ()
+   fun next (row: Int = -1)
    {  mplay?.stop ()
       mplay?.reset ()
-Log.d ("Files", "song done")
-      done.add (song)
-      play.removeAt (ppos)
-      b.loTbl.removeViews (ppos, 1)
+Log.d ("Files", "song done row=$row")
+      if (row == -1) {
+         done.add (song)
+         play.removeAt (ppos)
+         b.loTbl.removeViews (ppos, 1)
+        val tr = b.loTbl.getChildAt (ppos)
+         tr.requestFocus ()
+         tr.setBackgroundColor (0xFF3848AF.toInt ())
+         selRow = tr as TableRow
+         for (i in ppos until play.size) {
+           val tr = b.loTbl.getChildAt (i)
+            tr.id = i  // old val - 1
+         }
+      }
+      else
+         ppos = row
 
       if (ppos < play.size) {
          song = play [ppos]
@@ -52,6 +66,7 @@ Log.d ("Files", "ppos=$ppos fn=$song")
          mplay?.setOnCompletionListener { next () }
       }
    }
+
 
    fun rePlay (ac: MainActivity)
    // use shuf, pick, and done to make playlist from mp3
@@ -86,11 +101,29 @@ Log.d ("Files", "rePlay start")
          play.shuffle ()
       }
       ppos = 0
+
+     var id = 0
       play.forEach { fn ->
         val tr = TableRow (ac)
         val tv = TextView (ac)
          tv.text = fn
          tr.addView (tv)
+         tr.isClickable = true
+         tr.isFocusable = true
+         tr.isFocusableInTouchMode = true
+         if (id == ppos)  {
+            tr.requestFocus ()
+            tr.setBackgroundColor (0xFF3848AF.toInt ())
+            selRow = tr
+         }
+         tr.id = id++
+         tr.setOnClickListener { ctr ->
+            selRow?.setBackgroundColor (Color.TRANSPARENT)
+            ctr.setBackgroundColor (0xFF3848AF.toInt ())
+            ctr.requestFocus ()
+            selRow = ctr as TableRow
+            next (ctr.id)
+         }
          b.loTbl.addView (tr)
       }
 
@@ -102,6 +135,7 @@ Log.d ("Files", "rePlay start")
       mplay?.start ()
       mplay?.setOnCompletionListener { next () }
    }
+
 
    override fun onCreate (state: Bundle?)
    {  super.onCreate (state)
