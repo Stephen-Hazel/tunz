@@ -41,14 +41,44 @@ class MainActivity: AppCompatActivity ()
    private var ppos = 0
    private var selRow: TableRow? = null
 
-   fun fmt (fn: String): SpannableString
-   { val s = SpannableString (fn)
-     val sub = "boldsub"
-     val start = fn.indexOf (sub)
-      if (start != -1)
-         s.setSpan (StyleSpan (Typeface.BOLD), start, start + sub.length,
-                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-      return s
+
+   fun substr (s: String, b: Int, l: Int): String     // good grief
+   {  return s.substring (b, b+l);  }
+
+
+   fun fmtfn (fn: String): SpannableString
+   { var s = fn
+Log.d("Files", "fn=$fn")
+     val d = s.substringBefore ("/")   // dir
+      s =    s.substringAfter  ("/")
+      s = substr (s, 0, s.length-4)    // toss dir/ and .mp3
+      s = s.replace ("_", " ")         // _ => space
+     val f = s.indexOf     ("-")
+     val l = s.lastIndexOf ("-")
+Log.d("Files", "   f=$f l=$l")
+     var g: String
+     var t: String
+     var x: String
+      if (f != -1) {                   // l must have been set too
+         g = substr (fn, 0, f)
+         t = fn.substring (l+1)
+         if (f == l)  x = ""
+         else         x = substr (s, f+1, l-f-1)
+      }
+      else {
+         g = "??"
+         t = fn
+         x = ""
+      }
+     val ss = SpannableString ("$t $g $d $x")
+     var b  = ss.indexOf (t)
+      if (b != -1)  ss.setSpan (StyleSpan (Typeface.BOLD), b, b + t.length,
+                                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+      b = ss.indexOf (d)
+      if (b != -1)  ss.setSpan (StyleSpan (Typeface.BOLD), b, b + d.length,
+                                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+Log.d("Files", "   ss=$ss")
+      return ss
    }
 
 
@@ -78,7 +108,6 @@ Log.d ("Files", "ppos=$ppos fn=$song")
          mplay?.setDataSource ("$path/$song")
          mplay?.prepare ()
          mplay?.start ()
-         mplay?.setOnCompletionListener { next () }
       }
    }
 
@@ -121,7 +150,7 @@ Log.d ("Files", "rePlay start")
       play.forEach { fn ->
         val tr = TableRow (ac)
         val tv = TextView (ac)
-         tv.text = fn
+         tv.text = fmtfn (fn)
          tr.addView (tv)
          tr.isClickable = true
          tr.isFocusable = true
