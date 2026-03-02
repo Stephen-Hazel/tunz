@@ -1,1 +1,1 @@
-test if done truly gets erased (some day)
+when shuf is off, it's still not sorted by artist,title (it's by dir,artist,title)

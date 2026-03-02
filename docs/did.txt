@@ -1,3 +1,8 @@
 2026Feb
    wrote it in i think a lil under a month of at home time
    based on my website song player/caster
+
+2026Mar
+   moved from Music to Music/tunz/dir/mp3files to keep out android rifraff
+   store a skip list to get _a => St :)
+   pop lyrics when song changes

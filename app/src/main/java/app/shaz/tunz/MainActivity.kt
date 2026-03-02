@@ -23,11 +23,19 @@ import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.TableRow
 import android.widget.TextView
+import androidx.core.net.toUri
 
 
 data class FNList (
    val dir: String,
    var fn:  MutableList<String>
+)
+
+data class FNTitle (
+   val dir: String,
+   val grp: String,
+   val x:   String,
+   val ttl: String
 )
 
 
@@ -41,13 +49,14 @@ class MainActivity: AppCompatActivity ()
    private var shuf: Boolean = true
    private var pick = mutableListOf<String>()
    private var done = mutableListOf<String>()
+   private var skip = mutableListOf<String>()
 
    private var play = mutableListOf<String>()
    private var song = ""
    private var ppos = 0
    private var selRow: TableRow? = null
 
-   private lateinit var btDisco: BTDisco
+   private lateinit var btDisco: BTDisco    // is this word salad necessary?
    private val intentFilter = IntentFilter (
                                        AudioManager.ACTION_AUDIO_BECOMING_NOISY)
 
@@ -63,7 +72,7 @@ class MainActivity: AppCompatActivity ()
    {  return s.substring (b, b+l);  }
 
 
-   fun fmtfn (fn: String): SpannableString
+   fun splitfn (fn: String): FNTitle
    { var s = fn
      val d = s.substringBefore ("/")   // dir
       s =    s.substringAfter  ("/")
@@ -75,24 +84,38 @@ class MainActivity: AppCompatActivity ()
      var t: String
      var x: String
       if (f != -1) {                   // l must have been set too
-         g = substr (s, 0, f)
-         t = s.substring (l+1)
+         g = substr (s, 0, f).trim ()
+         t = s.substring (l+1).trim ()
          if (f == l)  x = ""
-         else         x = substr (s, f+1, l-f-1)
+         else         x = substr (s, f+1, l-f-1).trim ()
       }
       else {
          g = ""
-         t = s
+         t = s.trim ()
          x = ""
       }
-     val ss = SpannableString ("$g  $t  $x  $d")
-     var b  = ss.indexOf (t)
-      if (b != -1)  ss.setSpan (StyleSpan (Typeface.BOLD), b, b + t.length,
+      return FNTitle (d, g, x, t)
+   }
+
+
+   fun fmtfn (fn: String): SpannableString
+   { val fnt = splitfn (fn)
+     val ss  = SpannableString ("${fnt.grp}  ${fnt.ttl}  ${fnt.x}  ${fnt.dir}")
+     var b   = ss.indexOf (fnt.ttl)
+      if (b != -1)  ss.setSpan (StyleSpan (Typeface.BOLD), b, b + fnt.ttl.length,
                                 Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-      b = ss.indexOf (d)
-      if (b != -1)  ss.setSpan (StyleSpan (Typeface.BOLD), b, b + d.length,
+      b      = ss.indexOf (fnt.dir)
+      if (b != -1)  ss.setSpan (StyleSpan (Typeface.BOLD), b, b + fnt.dir.length,
                                 Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
       return ss
+   }
+
+
+   fun lyr ()
+   { val fnt = splitfn (song)
+     val url = "https://google.com/search?q=lyrics \"${fnt.ttl}\" \"${fnt.grp}\""
+     val int = Intent (Intent.ACTION_VIEW, url.toUri ())
+      startActivity (int)
    }
 
 
@@ -113,8 +136,10 @@ class MainActivity: AppCompatActivity ()
             tr.id = i  // old val - 1
          }
       }
-      else
+      else {
+         if (! skip.contains (song))  skip.add (song)
          ppos = row
+      }
 
       if (ppos < play.size) {
          song = play [ppos]
@@ -122,6 +147,18 @@ class MainActivity: AppCompatActivity ()
          mplay?.setDataSource ("$path/$song")
          mplay?.prepare ()
          mplay?.start ()
+         lyr ()
+      }
+   }
+
+
+   fun pick2play ()
+   {  pick.forEach { p ->
+         mp3.forEach { m ->
+            if (p == m.dir)  m.fn.forEach { fn ->
+               play.add ("$p/$fn")
+            }
+         }
       }
    }
 
@@ -138,22 +175,12 @@ class MainActivity: AppCompatActivity ()
       b.loTbl.removeAllViews ()
       if (pick.isEmpty ())  return
 
-      pick.forEach { p -> mp3.forEach { m ->
-         if (p == m.dir)  m.fn.forEach { fn -> play.add ("$p/$fn") }
-      }}
+      pick2play ()
       if (shuf) {
          play.removeAll (done)
          if (play.isEmpty ()) {
             done = mutableListOf ()
-
-         // one more time sigh
-            pick.forEach { p ->
-               mp3.forEach { m ->
-                  if (p == m.dir)  m.fn.forEach { fn ->
-                     play.add ("$p/$fn")
-                  }
-               }
-            }
+            pick2play ()
          }
          play.shuffle ()
       }
@@ -191,6 +218,7 @@ class MainActivity: AppCompatActivity ()
       mplay?.prepare ()
       mplay?.start ()
       mplay?.setOnCompletionListener { next () }
+      lyr ()
    }
 
 
@@ -208,19 +236,16 @@ class MainActivity: AppCompatActivity ()
              emptySet ())?.toMutableList () ?: mutableListOf ()
       done = p.getStringSet ("done",
              emptySet ())?.toMutableList () ?: mutableListOf ()
-//done.forEach { Log.d("Files", "done=$it") }
-//pick.forEach { Log.d("Files", "pick=$it") }
+      skip = p.getStringSet ("skip",
+             emptySet ())?.toMutableList () ?: mutableListOf ()
+skip.forEach { Log.d("Files", it) }
 
    // list off Music into path, mp3
-      path = Environment.getExternalStorageDirectory ().toString () + "/Music"
+      path = Environment.getExternalStorageDirectory ().toString () +
+             "/Music/tunz"
      val mus = File (path).listFiles ()
      val dir = mutableListOf<String> ()
-      for (i in mus.indices) {
-         if (! mus [i]!!.isDirectory ())  continue
-        val n = mus [i]!!.getName ()
-         if (n == ".thumbnails")  continue
-         dir.add (n)
-      }
+      for (i in mus.indices)  dir.add (mus [i]!!.getName ())
       dir.sort ()
       dir.forEach { d ->
         val dl = File ("$path/$d").listFiles ()
@@ -271,11 +296,10 @@ class MainActivity: AppCompatActivity ()
    {  super.onDestroy ()
 
    // close mediaplayer
+      unregisterReceiver (btDisco)
       if (mplay?.isPlaying == true)  mplay?.stop ()
       mplay?.release ()
       mplay = null
-
-      unregisterReceiver (btDisco)
 
    // persist vars
 //Log.d("Files", "save pref start")
@@ -284,5 +308,6 @@ class MainActivity: AppCompatActivity ()
       e.putBoolean   ("shuf", shuf).commit ()
       e.putStringSet ("pick", pick.toSet ()).commit ()
       e.putStringSet ("done", done.toSet ()).commit ()
+      e.putStringSet ("skip", skip.toSet ()).commit ()
    }
 }
