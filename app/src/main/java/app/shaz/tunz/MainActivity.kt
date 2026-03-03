@@ -112,17 +112,20 @@ class MainActivity: AppCompatActivity ()
 
 
    fun lyr ()
-   { val fnt = splitfn (song)
+   {
+   /*
+     val fnt = splitfn (song)
      val url = "https://google.com/search?q=lyrics \"${fnt.ttl}\" \"${fnt.grp}\""
      val int = Intent (Intent.ACTION_VIEW, url.toUri ())
       startActivity (int)
+    */
    }
 
 
    fun next (row: Int = -1)
    {  mplay?.stop ()
       mplay?.reset ()
-//Log.d ("Files", "song done row=$row")
+Log.d ("Files", "song done row=$row")
       if (row == -1) {
          done.add (song)
          play.removeAt (ppos)
@@ -245,11 +248,15 @@ skip.forEach { Log.d("Files", it) }
              "/Music/tunz"
      val mus = File (path).listFiles ()
      val dir = mutableListOf<String> ()
-      for (i in mus.indices)  dir.add (mus [i]!!.getName ())
+      for (i in mus.indices) {
+         val dn = mus [i].getName ()
+          Log.d("Files", dn)
+          if (dn != ".thumbnails")  dir.add (dn)
+      }
       dir.sort ()
       dir.forEach { d ->
         val dl = File ("$path/$d").listFiles ()
-//Log.d("Files", "mus dir=$d files=${dl!!.size}")
+Log.d("Files", "mus dir=$d files=${dl!!.size}")
         val ls: Array<String> = dl.map { it.getName () }.toTypedArray ()
          ls.sort ()
          mp3.add (FNList (d, ls.toMutableList ()))
