@@ -102,10 +102,12 @@ class MainActivity: AppCompatActivity ()
    { val fnt = splitfn (fn)
      val ss  = SpannableString ("${fnt.grp}  ${fnt.ttl}  ${fnt.x}  ${fnt.dir}")
      var b   = ss.indexOf (fnt.ttl)
-      if (b != -1)  ss.setSpan (StyleSpan (Typeface.BOLD), b, b + fnt.ttl.length,
+      if (b != -1)  ss.setSpan (StyleSpan (Typeface.BOLD), b, b + fnt.ttl.length
+,
                                 Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
       b      = ss.indexOf (fnt.dir)
-      if (b != -1)  ss.setSpan (StyleSpan (Typeface.BOLD), b, b + fnt.dir.length,
+      if (b != -1)  ss.setSpan (StyleSpan (Typeface.BOLD), b, b + fnt.dir.length
+,
                                 Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
       return ss
    }
@@ -115,7 +117,8 @@ class MainActivity: AppCompatActivity ()
    {
    /*
      val fnt = splitfn (song)
-     val url = "https://google.com/search?q=lyrics \"${fnt.ttl}\" \"${fnt.grp}\""
+     val url = "https://google.com/search?q=lyrics \"${fnt.ttl}\" \"${fnt.grp}\"
+"
      val int = Intent (Intent.ACTION_VIEW, url.toUri ())
       startActivity (int)
     */
@@ -187,6 +190,8 @@ Log.d ("Files", "song done row=$row")
          }
          play.shuffle ()
       }
+      else
+         play.sortBy { fmtfn (it).toString () }
       ppos = 0
 
      var id = 0

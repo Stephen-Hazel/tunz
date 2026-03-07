@@ -1,6 +1,8 @@
 2026Feb
    wrote it in i think a lil under a month of at home time
    based on my website song player/caster
+   fixed sort when not shuffled to not be by dir group etc title
+      by group etc title dir now
 
 2026Mar
    moved from Music to Music/tunz/dir/mp3files to keep out android rifraff

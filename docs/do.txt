@@ -1,2 +1,2 @@
-when shuf is off, it's still not sorted by artist,title (it's by dir,artist,title)
-   make a "foreground service whatev"
+when shuf is off,
+   make a "foreground service whatev" so lyr can autokick
