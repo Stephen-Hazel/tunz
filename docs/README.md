@@ -24,3 +24,7 @@ or it'll sort wrong etc
 good luck     sh@shaz.app
 
 oh - open source mit license
+
+[do - to do list](do.txt)
+
+[did - release notes](did.txt)
