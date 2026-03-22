@@ -1,2 +1,1 @@
-when shuf is off,
-   make a "foreground service whatev" so lyr can autokick
+make a "foreground service whatev" so lyr can autokick

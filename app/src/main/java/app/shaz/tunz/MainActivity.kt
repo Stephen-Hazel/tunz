@@ -23,7 +23,6 @@ import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.TableRow
 import android.widget.TextView
-import androidx.core.net.toUri
 
 
 data class FNList (
@@ -177,7 +176,7 @@ Log.d ("Files", "song done row=$row")
       if (mplay?.isPlaying == true)  mplay?.stop ()
       mplay?.reset ()
 
-      play = mutableListOf ()
+      play.clear ()
       b.loTbl.removeAllViews ()
       if (pick.isEmpty ())  return
 
@@ -185,7 +184,7 @@ Log.d ("Files", "song done row=$row")
       if (shuf) {
          play.removeAll (done)
          if (play.isEmpty ()) {
-            done = mutableListOf ()
+            done.clear ()
             pick2play ()
          }
          play.shuffle ()
