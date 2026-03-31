@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Build
@@ -126,6 +127,18 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
                svc?.next (ctr.id)
             }
             b.loTbl.addView (tr)
+         }
+      }
+   }
+
+
+   override fun onAlbumArtChanged (art: Bitmap?)
+   {  runOnUiThread {
+         if (art != null) {
+            b.ivArt.setImageBitmap (art)
+            b.ivArt.visibility = View.VISIBLE
+         } else {
+            b.ivArt.visibility = View.GONE
          }
       }
    }

@@ -7,18 +7,18 @@
     android:fitsSystemWindows="true"
     tools:context=".MainActivity">
 
-    <androidx.constraintlayout.widget.ConstraintLayout
+    <LinearLayout
         android:id="@+id/lo_const"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:orientation="vertical"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
         <LinearLayout
             android:id="@+id/lo_lin"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            app:layout_constraintTop_toTopOf="parent">
+            android:orientation="horizontal">
 
             <CheckBox
                 android:id="@+id/cb_shuf"
@@ -31,13 +31,9 @@
 
         <ScrollView
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="60dp"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/lo_lin"
-            app:layout_constraintVertical_bias="0.375">
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginStart="16dp">
 
             <HorizontalScrollView
                 android:layout_width="match_parent"
@@ -46,11 +42,7 @@
                 <TableLayout
                     android:id="@+id/lo_tbl"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-app:layout_constraintBottom_toBottomOf="parent"
-                    app:layout_constraintEnd_toEndOf="parent"
-                    app:layout_constraintStart_toStartOf="parent"
-                    app:layout_constraintTop_toBottomOf="@+id/lo_lin">
+                    android:layout_height="wrap_content">
 
                     <TableRow
                         android:layout_width="match_parent"
@@ -65,7 +57,15 @@ app:layout_constraintBottom_toBottomOf="parent"
             </HorizontalScrollView>
         </ScrollView>
 
-    </androidx.constraintlayout.widget.ConstraintLayout>
+        <ImageView
+            android:id="@+id/iv_art"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:scaleType="centerCrop"
+            android:visibility="gone" />
+
+    </LinearLayout>
 
         <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fab"

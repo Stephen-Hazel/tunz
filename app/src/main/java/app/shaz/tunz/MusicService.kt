@@ -11,6 +11,7 @@ import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.AudioManager
+import android.net.Uri
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.os.Binder
@@ -34,8 +35,9 @@ const val NOTIF_ID          = 1
 
 
 interface PlaybackCallback {
-   fun onPlaylistReady (play: List<String>)
-   fun onSongChanged   (removedPos: Int, newPpos: Int)
+   fun onPlaylistReady   (play: List<String>)
+   fun onSongChanged     (removedPos: Int, newPpos: Int)
+   fun onAlbumArtChanged (art: Bitmap?)
 }
 
 
@@ -161,6 +163,19 @@ class MusicService: Service ()
    }
 
 
+   private fun lyricsSearch ()
+   {  val fnt   = splitfn (song)
+      val query = Uri.encode ("${fnt.ttl} ${fnt.grp} lyrics")
+      val uri   = Uri.parse ("https://www.google.com/search?q=$query")
+      val i     = Intent (Intent.ACTION_VIEW, uri).addFlags (Intent.FLAG_ACTIVITY_NEW_TASK)
+      try {
+         startActivity (i.setPackage ("com.android.chrome"))
+      } catch (e: Exception) {
+         startActivity (i.setPackage (null))
+      }
+   }
+
+
    private fun loadAlbumArt ()
    {  val path = Environment.getExternalStorageDirectory ().toString () + "/Music/tunz/$song"
       val mmr  = MediaMetadataRetriever ()
@@ -171,6 +186,7 @@ class MusicService: Service ()
          else                null
       } catch (e: Exception) { null }
       finally { mmr.release () }
+      callback?.onAlbumArtChanged (albumArt)
    }
 
 
@@ -214,6 +230,7 @@ class MusicService: Service ()
       mplay?.setOnCompletionListener { next () }
       updateMediaSession ()
       postNotification ()
+      lyricsSearch ()
       callback?.onPlaylistReady (play.toList ())
    }
 
@@ -243,6 +260,7 @@ class MusicService: Service ()
          mplay?.setOnCompletionListener { next () }
          updateMediaSession ()
          postNotification ()
+         lyricsSearch ()
       }
       callback?.onSongChanged (removedPos, ppos)
    }
