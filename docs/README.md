@@ -2,7 +2,7 @@
 
 you'll need to give it the permission it DOESN'T ask for - sorry
 
-my Music dir has 4 dirs
+Music dir has pickable subdirs under it.  Minar are...
 
 An  (annie - my gf's songs - ones i don't like)
 St  (steve - my songs - ones she doesn't like)
@@ -18,8 +18,8 @@ play/pause is the "action button whatev"
 
 make sure to name your songs as
 group - year album song# - title.mp3
-
-or it'll sort wrong etc
+the middle part is optional but 
+there must be - - in the filename or it'll sort wrong etc
 
 good luck     sh@shaz.app
 

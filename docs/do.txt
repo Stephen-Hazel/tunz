@@ -1,2 +1,4 @@
-ai completed all my wishes - wow :O
-just gotta fully test it now
+new browser of lyrics doesn't pop after 1st song's is open.
+   (on next, no pop of new lyr)
+upload done.txt to https:/shaz/song/done.php
+
