@@ -188,6 +188,7 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
             b.loLin.addView (cb)
          }
       }
+      b.btnLyr.setOnClickListener { s.lyricsSearch () }
       b.fab.setOnClickListener { view ->
          Snackbar.make (view, "play/pause", Snackbar.LENGTH_LONG)
                  .setAction ("Action", null).setAnchorView (R.id.fab).show ()

@@ -1,4 +1,5 @@
-new browser of lyrics doesn't pop after 1st song's is open.
-   (on next, no pop of new lyr)
-upload done.txt to https:/shaz/song/done.php
+show song count
+button for lyrics pop
+load done.txt from web to add to local done.txt
+upload done.txt and skip.txt on exit
 

@@ -163,7 +163,7 @@ class MusicService: Service ()
    }
 
 
-   private fun lyricsSearch ()
+   fun lyricsSearch ()
    {  val fnt   = splitfn (song)
       val query = Uri.encode ("${fnt.ttl} ${fnt.grp} lyrics")
       val uri   = Uri.parse ("https://www.google.com/search?q=$query")
@@ -230,7 +230,6 @@ class MusicService: Service ()
       mplay?.setOnCompletionListener { next () }
       updateMediaSession ()
       postNotification ()
-      lyricsSearch ()
       callback?.onPlaylistReady (play.toList ())
    }
 
@@ -260,7 +259,6 @@ class MusicService: Service ()
          mplay?.setOnCompletionListener { next () }
          updateMediaSession ()
          postNotification ()
-         lyricsSearch ()
       }
       callback?.onSongChanged (removedPos, ppos)
    }
