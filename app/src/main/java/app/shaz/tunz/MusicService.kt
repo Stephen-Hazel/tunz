@@ -26,6 +26,7 @@ import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media.session.MediaButtonReceiver
 import java.io.File
+import java.net.URL
 
 
 const val ACTION_PLAY_PAUSE = "app.shaz.tunz.PLAY_PAUSE"
@@ -154,6 +155,21 @@ class MusicService: Service ()
       e.putStringSet ("pick", pick.toSet ()).commit ()
       e.putStringSet ("done", done.toSet ()).commit ()
       e.putStringSet ("skip", skip.toSet ()).commit ()
+
+     val doneSnap = done.toList ()
+     val skipSnap = skip.toList ()
+      Thread {
+         doneSnap.forEach { d ->
+            try {
+               URL ("https://shaz.app/song/did.php?did=$d").openConnection ().getInputStream ().close ()
+            } catch (ex: Exception) { }
+         }
+         skipSnap.forEach { s ->
+            try {
+               URL ("https://shaz.app/song/skip.php?it=$s").openConnection ().getInputStream ().close ()
+            } catch (ex: Exception) { }
+         }
+      }.start ()
    }
 
 

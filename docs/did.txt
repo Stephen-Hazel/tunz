@@ -1,3 +1,8 @@
+2026Apr
+   show song count
+   button for lyrics pop
+   upload done.txt and skip.txt on exit
+
 2026Mar
    moved from Music to Music/tunz/dir/mp3files to keep out android rifraff
    store a skip list to get _a => St :)

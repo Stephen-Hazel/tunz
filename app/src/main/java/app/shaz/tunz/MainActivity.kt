@@ -107,6 +107,7 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
    {  val ppos = svc?.ppos ?: 0
       runOnUiThread {
          selRow = null
+         b.tvCount.text = "${play.size}"
          b.loTbl.removeAllViews ()
          var id = 0
          play.forEach { fn ->

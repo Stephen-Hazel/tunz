@@ -41,6 +41,13 @@
                 android:layout_height="wrap_content"
                 android:text="lyr" />
 
+            <TextView
+                android:id="@+id/tv_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:paddingStart="8dp" />
+
         </LinearLayout>
 
         <ScrollView
