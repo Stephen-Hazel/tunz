@@ -1,13 +1,18 @@
 2026Apr
    show song count
    button for lyrics pop
-   upload done.txt and skip.txt on exit
+   upload did.txt and skip.txt in shaz.app/song/ :)
+   scratch that - only do did.php, skip.php on next song
+   merge shaz.app/song/did.txt from web to local done.txt on app start
+   interleave songs in each dir when shuffling
+   load new songs from shaz.app/song/ on app start if on wifi :)
+   make a anNst boolean so other people don't do the shaz.app/song sync stuff
 
 2026Mar
    moved from Music to Music/tunz/dir/mp3files to keep out android rifraff
    store a skip list to get _a => St :)
    pop lyrics when song changes - naw need foreground service thingo
-	properly callin .clear ()
+   properly callin .clear ()
 
 2026Feb
    wrote it in i think a lil under a month of at home time

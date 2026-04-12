@@ -1,3 +1,5 @@
+// MainActivity.kt - tunz ui (most stuff happens in the service now)
+
 package app.shaz.tunz
 
 import android.Manifest
@@ -8,9 +10,12 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.IBinder
+import android.provider.Settings
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.StyleSpan
@@ -40,6 +45,7 @@ data class FNTitle (
 
 
 fun substr (s: String, b: Int, l: Int): String
+// kotlin n java just don't do substr PROPerly if'n ya ask mee
 {  return s.substring (b, b+l)
 }
 
@@ -75,10 +81,10 @@ fun fmtfn (fn: String): SpannableString
   val ss  = SpannableString ("${fnt.grp}  ${fnt.ttl}  ${fnt.x}  ${fnt.dir}")
   var b   = ss.indexOf (fnt.ttl)
    if (b != -1)  ss.setSpan (StyleSpan (Typeface.BOLD), b, b + fnt.ttl.length,
-                              Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                             Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
    b = ss.indexOf (fnt.dir)
    if (b != -1)  ss.setSpan (StyleSpan (Typeface.BOLD), b, b + fnt.dir.length,
-                              Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                             Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
    return ss
 }
 
@@ -198,17 +204,47 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
    }
 
 
+   private fun checkPerms ()
+   // holy god android (pretty glad i got ai now)
+   { val need = mutableListOf<String> ()
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+         if (ContextCompat.checkSelfPermission (this,
+                                         Manifest.permission.POST_NOTIFICATIONS)
+             != PackageManager.PERMISSION_GRANTED)
+            need.add (Manifest.permission.POST_NOTIFICATIONS)
+         if (ContextCompat.checkSelfPermission (this,
+                                           Manifest.permission.READ_MEDIA_AUDIO)
+             != PackageManager.PERMISSION_GRANTED)
+            need.add (Manifest.permission.READ_MEDIA_AUDIO)
+      }
+      else {
+         if (ContextCompat.checkSelfPermission (this,
+                                      Manifest.permission.READ_EXTERNAL_STORAGE)
+             != PackageManager.PERMISSION_GRANTED)
+            need.add (Manifest.permission.READ_EXTERNAL_STORAGE)
+         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+             ContextCompat.checkSelfPermission (this,
+                                     Manifest.permission.WRITE_EXTERNAL_STORAGE)
+             != PackageManager.PERMISSION_GRANTED)
+            need.add (Manifest.permission.WRITE_EXTERNAL_STORAGE)
+      }
+      if (need.isNotEmpty ())
+         ActivityCompat.requestPermissions (this, need.toTypedArray (), 1)
+
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+          ! Environment.isExternalStorageManager ()) {
+        val uri = Uri.parse ("package:$packageName")
+         startActivity (Intent (
+            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri))
+      }
+   }
+
+
    override fun onCreate (state: Bundle?)
    {  super.onCreate (state)
       b = ActivityMainBinding.inflate (layoutInflater)
       setContentView (b.root)
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-         if (ContextCompat.checkSelfPermission (this, Manifest.permission.POST_NOTIFICATIONS)
-               != PackageManager.PERMISSION_GRANTED)
-            ActivityCompat.requestPermissions (
-               this, arrayOf (Manifest.permission.POST_NOTIFICATIONS), 1)
-      }
+      checkPerms ()
 
      val intent = Intent (this, MusicService::class.java)
       startService (intent)
