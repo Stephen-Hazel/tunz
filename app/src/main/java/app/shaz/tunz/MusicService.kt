@@ -14,8 +14,6 @@ import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.AudioManager
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.net.Uri
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
@@ -30,9 +28,17 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media.session.MediaButtonReceiver
+import com.google.android.gms.cast.MediaInfo
+import com.google.android.gms.cast.MediaLoadRequestData
+import com.google.android.gms.cast.MediaMetadata  as CastMeta
+import com.google.android.gms.cast.MediaStatus
+import com.google.android.gms.cast.framework.CastContext
+import com.google.android.gms.cast.framework.CastSession
+import com.google.android.gms.cast.framework.SessionManagerListener
+import com.google.android.gms.cast.framework.media.RemoteMediaClient
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
+import java.net.Inet4Address
+import java.net.NetworkInterface
 
 
 // setup play/pause/skip api
@@ -60,7 +66,6 @@ class MusicService: Service ()
    private var mplay: MediaPlayer? = null
    var mp3 = mutableListOf<FNList> ()
        private set
-   var anNst: Boolean = false          // only do website stuff when me n annie
    var path = ""
        private set
    var shuf:  Boolean = true
@@ -70,13 +75,14 @@ class MusicService: Service ()
    private var done = mutableListOf<String> ()
    var play = mutableListOf<String> ()
        private set
-   var dl = mutableListOf<String> ()
-       private set
    var song = ""
        private set
    var ppos = 0
        private set
    private var albumArt: Bitmap? = null
+   private var castSession: CastSession? = null
+   private var httpServer: LocalHttpServer? = null
+   private var castCb: RemoteMediaClient.Callback? = null
 
    private lateinit var mediaSession: MediaSessionCompat
 
@@ -90,26 +96,115 @@ class MusicService: Service ()
    fun removePick (dir: String) { pick.remove (dir) }
    fun setShuf    (v: Boolean)  { shuf = v }
 
-   fun wifiok (): Boolean
-   { val cm = getSystemService (CONNECTIVITY_SERVICE) as ConnectivityManager
-     val nc = cm.getNetworkCapabilities (cm.activeNetwork)
-      return (nc?.hasTransport (NetworkCapabilities.TRANSPORT_WIFI) == true)
+   private fun isCasting () = castSession?.isConnected == true
+
+   private fun getLocalIp (): String
+   {  try {
+         NetworkInterface.getNetworkInterfaces ()?.toList ()?.forEach { iface ->
+            iface.inetAddresses?.toList ()?.forEach { addr ->
+               if (! addr.isLoopbackAddress && addr is Inet4Address)
+                  return addr.hostAddress ?: "127.0.0.1"
+            }
+         }
+      }
+      catch (e: Exception) { }
+      return "127.0.0.1"
    }
 
-   fun cellok (): Boolean
-   { val cm = getSystemService (CONNECTIVITY_SERVICE) as ConnectivityManager
-     val nc = cm.getNetworkCapabilities (cm.activeNetwork)
-      return (nc?.hasTransport (NetworkCapabilities.TRANSPORT_CELLULAR) ==true)
+   private fun loadCastSong ()
+   {  val cs      = castSession ?: return
+      val encoded = song.split ("/").joinToString ("/") { Uri.encode (it) }
+      val url     = "http://${getLocalIp ()}:8765/$encoded"
+      val fnt = splitfn (song)
+      val meta = CastMeta (CastMeta.MEDIA_TYPE_MUSIC_TRACK)
+      meta.putString (CastMeta.KEY_TITLE,  fnt.ttl)
+      meta.putString (CastMeta.KEY_ARTIST, fnt.grp)
+      val mi  = MediaInfo.Builder (url)
+                   .setStreamType  (MediaInfo.STREAM_TYPE_BUFFERED)
+                   .setContentType ("audio/mpeg")
+                   .setMetadata    (meta)
+                   .build ()
+      cs.remoteMediaClient?.load (
+         MediaLoadRequestData.Builder ().setMediaInfo (mi).build ())
    }
 
-   fun online (): Boolean
-   {  if (wifiok () || cellok ())  return true
-      return false
+   private fun regCastCb ()
+   {  val client = castSession?.remoteMediaClient ?: return
+      castCb = object : RemoteMediaClient.Callback ()
+      {  override fun onStatusUpdated ()
+         {  val ms = castSession?.remoteMediaClient?.mediaStatus ?: return
+            if (ms.playerState == MediaStatus.PLAYER_STATE_IDLE &&
+                ms.idleReason  == MediaStatus.IDLE_REASON_FINISHED)
+               next ()
+         }
+      }
+      client.registerCallback (castCb!!)
+   }
+
+   private fun unregCastCb ()
+   {  castCb?.let { castSession?.remoteMediaClient?.unregisterCallback (it) }
+      castCb = null
+   }
+
+   private val castListener = object : SessionManagerListener<CastSession>
+   {  override fun onSessionStarted (session: CastSession, id: String)
+      {  castSession = session
+         httpServer  = LocalHttpServer (path).also { it.start () }
+         mplay?.pause ()
+         if (song.isNotEmpty ())  loadCastSong ()
+         regCastCb ()
+         updateMediaSession ()
+         postNotification ()
+      }
+
+      override fun onSessionResumed (
+         session: CastSession, wasSuspended: Boolean)
+      {  castSession = session
+         if (httpServer == null)
+            httpServer = LocalHttpServer (path).also { it.start () }
+         if (song.isNotEmpty ())  loadCastSong ()
+         regCastCb ()
+         mplay?.pause ()
+      }
+
+      override fun onSessionEnded (session: CastSession, error: Int)
+      {  unregCastCb ()
+         castSession = null
+         httpServer?.stop ()
+         httpServer = null
+         if (song.isNotEmpty ()) {
+            mplay?.reset ()
+            try {
+               mplay?.setDataSource ("$path/$song")
+               mplay?.prepare ()
+               mplay?.start ()
+               mplay?.setOnCompletionListener { next () }
+            }
+            catch (e: Exception) { }
+         }
+         updateMediaSession ()
+         postNotification ()
+      }
+
+      override fun onSessionStarting    (s: CastSession) {}
+      override fun onSessionStartFailed (s: CastSession, e: Int) {}
+      override fun onSessionEnding      (s: CastSession) {}
+      override fun onSessionResuming    (s: CastSession, id: String) {}
+      override fun onSessionResumeFailed(s: CastSession, e: Int) {}
+      override fun onSessionSuspended   (s: CastSession, r: Int) {}
    }
 
    fun togglePlayPause ()
-   {  if (mplay?.isPlaying == true)  mplay?.pause ()
-      else                           mplay?.start ()
+   {  if (isCasting ()) {
+        val client = castSession!!.remoteMediaClient ?: return
+        val state  = client.mediaStatus?.playerState
+         if (state == MediaStatus.PLAYER_STATE_PLAYING)  client.pause (null)
+         else                                            client.play  (null)
+      }
+      else {
+         if (mplay?.isPlaying == true)  mplay?.pause ()
+         else                           mplay?.start ()
+      }
       updateMediaSession ()
       postNotification ()
    }
@@ -133,19 +228,6 @@ class MusicService: Service ()
    // and our done list so we don't hear ANY repeats
       done = p.getStringSet ("done", emptySet ())?.toMutableList () ?:
                                                                 mutableListOf ()
-      if (anNst && online ()) {
-      // merge shaz.app/song/did.txt into our done list
-         try {
-           val dc  = URL ("https://shaz.app/song/did.txt")
-                        .openConnection () as HttpURLConnection
-            dc.connectTimeout = 8000
-            dc.readTimeout    = 8000
-           val rmt = dc.inputStream.bufferedReader ().readText ()
-            rmt.lines ().filter { it.isNotBlank () && ! done.contains (it) }
-                        .forEach { done.add (it) }
-         }
-         catch (ex: Exception) { }
-      }
    // ok, list off each dir in path
      val mus  = File (path).listFiles () ?: emptyArray ()
      val dir  = mutableListOf<String> ()
@@ -189,67 +271,13 @@ class MusicService: Service ()
          isActive = true
       }
 
-   // if we're hooked to wifi, get the songs on https://shaz/song and
-   //    refresh our local mp3 files (kill missing ones, download new ones)
-      if (anNst && wifiok ()) {
-         Thread {
-            try {
-            // download list of what shaz.app/song has
-              val con = URL ("https://shaz.app/song/list.php")
-                           .openConnection () as HttpURLConnection
-               con.connectTimeout = 8000
-               con.readTimeout    = 8000
-              val txt = con.inputStream.bufferedReader ().readText ()
-               dl.addAll (txt.lines ().filter { it.isNotBlank () })
-
-            // any local file not in dl gets killed
-              val local = mp3.flatMap { m -> m.fn.map { "${m.dir}/$it" } }
-              var changed = false
-               local.forEach { rel ->
-                  if (! dl.contains (rel)) {
-                     File ("$path/$rel").delete ()
-                     changed = true
-                  }
-               }
-
-            // any dl file not here gets downloaded
-               dl.forEach { rel ->
-                 val f = File ("$path/$rel")
-                  if (! f.exists ()) {
-                     f.parentFile?.mkdirs ()
-                     try {
-                       val dc = URL ("https://shaz.app/song/song/$rel")
-                                   .openConnection () as HttpURLConnection
-                        dc.connectTimeout = 8000
-                        dc.readTimeout    = 60000
-                       val bytes = dc.inputStream.readBytes ()
-                        f.writeBytes (bytes)
-                        changed = true
-                     }
-                     catch (ex: Exception) { }
-                  }
-               }
-
-               if (changed) {
-               // gotta rebuild what we did above - but this'll be signif later
-                  mp3.clear ()
-                 val mus  = File (path).listFiles () ?: emptyArray ()
-                 val dirs = mutableListOf<String> ()
-                  mus.forEach { if (it.name != ".thumbnails")
-                                   dirs.add (it.name) }
-                  dirs.sort ()
-                  dirs.forEach { d ->
-                    val ls = File ("$path/$d").listFiles ()
-                                ?.map { it.name }?.sorted ()
-                                ?: emptyList ()
-                     mp3.add (FNList (d, ls.toMutableList ()))
-                  }
-                  rePlay ()
-               }
-            }
-            catch (ex: Exception) { }
-         }.start ()
+      try {
+        val cc = CastContext.getSharedInstance (this)
+         cc.sessionManager.addSessionManagerListener (
+            castListener, CastSession::class.java)
+         castSession = cc.sessionManager.currentCastSession
       }
+      catch (e: Exception) { }
    }
 
 
@@ -280,6 +308,13 @@ class MusicService: Service ()
       e.putBoolean   ("shuf", shuf).commit ()
       e.putStringSet ("pick", pick.toSet ()).commit ()
       e.putStringSet ("done", done.toSet ()).commit ()
+      try {
+         CastContext.getSharedInstance (this)
+            .sessionManager.removeSessionManagerListener (
+               castListener, CastSession::class.java)
+      }
+      catch (ex: Exception) { }
+      httpServer?.stop ()
    }
 
 
@@ -359,7 +394,7 @@ class MusicService: Service ()
                mp3.find { it.dir == p }?.fn
                   ?.map { "$p/$it" }
                   ?.shuffled ()
-                  ?.let { buckets.add (it.toMutableList ()) }
+                  ?.let { if (it.isNotEmpty ()) buckets.add (it.toMutableList ()) }
             }
          }
       // interleave round-robin across buckets
@@ -383,10 +418,13 @@ class MusicService: Service ()
       ppos = 0
       song = play [ppos]
       loadAlbumArt ()
-      mplay?.setDataSource ("$path/$song")
-      mplay?.prepare ()
-      mplay?.start ()
-      mplay?.setOnCompletionListener { next () }
+      if (isCasting ())  loadCastSong ()
+      else {
+         mplay?.setDataSource ("$path/$song")
+         mplay?.prepare ()
+         mplay?.start ()
+         mplay?.setOnCompletionListener { next () }
+      }
       updateMediaSession ()
       postNotification ()
       callback?.onPlaylistReady (play.toList ())
@@ -398,41 +436,25 @@ class MusicService: Service ()
    {  mplay?.stop ()
       mplay?.reset ()
      val removedPos: Int
-     val songSnap = song
       if (row == -1) {
          done.add (song)
-
-         if (anNst && online ()) {
-         // send did song to shaz.app/song
-            Thread {
-               try {URL ("https://shaz.app/song/did.php?did=$songSnap")
-                       .openConnection ().getInputStream ().close ()}
-               catch (ex: Exception) { }
-            }.start ()
-         }
-
          removedPos = ppos
          play.removeAt (ppos)
       }
       else {
-         if (anNst && online ()) {
-         // send skip song to shaz.app/song
-            Thread {
-               try {URL ("https://shaz.app/song/skip.php?it=$songSnap")
-                       .openConnection ().getInputStream ().close ()}
-               catch (ex: Exception) { }
-            }.start ()
-         }
          removedPos = -1
          ppos = row
       }
       if (ppos < play.size) {
          song = play [ppos]
          loadAlbumArt ()
-         mplay?.setDataSource ("$path/$song")
-         mplay?.prepare ()
-         mplay?.start ()
-         mplay?.setOnCompletionListener { next () }
+         if (isCasting ())  loadCastSong ()
+         else {
+            mplay?.setDataSource ("$path/$song")
+            mplay?.prepare ()
+            mplay?.start ()
+            mplay?.setOnCompletionListener { next () }
+         }
          updateMediaSession ()
          postNotification ()
       }
@@ -502,7 +524,13 @@ class MusicService: Service ()
                               .setShowActionsInCompactView (0, 1))
         .build ()
 
-      startForeground (NOTIF_ID, notif)
+      try {
+         startForeground (NOTIF_ID, notif)
+      }
+      catch (e: Exception) {
+         // Android 12+ blocks startForeground() from background
+         // contexts (e.g. Cast callbacks) — swallow and continue
+      }
    }
 }
 
