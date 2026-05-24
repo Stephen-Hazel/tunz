@@ -27,6 +27,8 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.google.android.gms.cast.framework.CastButtonFactory
+import com.google.android.gms.cast.framework.CastContext
 import com.google.android.material.snackbar.Snackbar
 import app.shaz.tunz.databinding.ActivityMainBinding
 
@@ -77,6 +79,7 @@ fun splitfn (fn: String): FNTitle
 
 
 fun fmtfn (fn: String): SpannableString
+// i just want some bold...
 { val fnt = splitfn (fn)
   val ss  = SpannableString ("${fnt.grp}  ${fnt.ttl}  ${fnt.x}  ${fnt.dir}")
   var b   = ss.indexOf (fnt.ttl)
@@ -93,7 +96,7 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
 {  private lateinit var b: ActivityMainBinding
    private var svc: MusicService? = null
    private var selRow: TableRow? = null
-   private var dirCheckboxesAdded = false
+   private var sentToPerms = false
 
    private val conn = object: ServiceConnection
    {  override fun onServiceConnected (name: ComponentName, binder: IBinder)
@@ -177,9 +180,10 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
          s.setShuf (chk)
          s.rePlay ()
       }
-      if (! dirCheckboxesAdded) {
-         dirCheckboxesAdded = true
-         s.mp3.forEach { m ->
+      for (i in b.loLin.childCount - 1 downTo 0)
+         if (b.loLin.getChildAt (i).id != b.cbShuf.id)
+            b.loLin.removeViewAt (i)
+      s.mp3.forEach { m ->
            val cb = CheckBox (this)
             cb.text = m.dir
             cb.id = View.generateViewId ()
@@ -193,9 +197,12 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
                s.rePlay ()
             }
             b.loLin.addView (cb)
-         }
       }
       b.btnLyr.setOnClickListener { s.lyricsSearch () }
+      try {
+         CastButtonFactory.setUpMediaRouteButton (applicationContext, b.btnCast)
+      }
+      catch (e: Exception) { }
       b.fab.setOnClickListener { view ->
          Snackbar.make (view, "play/pause", Snackbar.LENGTH_LONG)
                  .setAction ("Action", null).setAnchorView (R.id.fab).show ()
@@ -234,9 +241,40 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
           ! Environment.isExternalStorageManager ()) {
         val uri = Uri.parse ("package:$packageName")
+         sentToPerms = true
          startActivity (Intent (
             Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri))
       }
+   }
+
+
+   private fun restartService ()
+   {  sentToPerms = false
+      svc?.setCallback (null)
+      svc = null
+      unbindService (conn)
+     val intent = Intent (this, MusicService::class.java)
+      stopService   (intent)
+      startService  (intent)
+      bindService   (intent, conn, BIND_AUTO_CREATE)
+   }
+
+
+   override fun onResume ()
+   {  super.onResume ()
+      if (sentToPerms &&
+          (Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
+           Environment.isExternalStorageManager ()))
+         restartService ()
+   }
+
+
+   override fun onRequestPermissionsResult (
+      req: Int, perms: Array<out String>, results: IntArray)
+   {  super.onRequestPermissionsResult (req, perms, results)
+      if (req == 1 && results.any {
+               it == PackageManager.PERMISSION_GRANTED })
+         restartService ()
    }
 
 
@@ -245,6 +283,8 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
       b = ActivityMainBinding.inflate (layoutInflater)
       setContentView (b.root)
       checkPerms ()
+
+      try { CastContext.getSharedInstance (this) } catch (e: Exception) { }
 
      val intent = Intent (this, MusicService::class.java)
       startService (intent)

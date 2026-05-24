@@ -1,5 +1,5 @@
 // MusicService.kt - need a "foreground service" so we can pop lyrics and
-//    do, uhh, a bunch of stuff while music still plays
+//    do, uhh, a bunch of stuff while music =still= plays
 
 package app.shaz.tunz
 
@@ -112,27 +112,27 @@ class MusicService: Service ()
    }
 
    private fun loadCastSong ()
-   {  val cs      = castSession ?: return
-      val encoded = song.split ("/").joinToString ("/") { Uri.encode (it) }
-      val url     = "http://${getLocalIp ()}:8765/$encoded"
-      val fnt = splitfn (song)
-      val meta = CastMeta (CastMeta.MEDIA_TYPE_MUSIC_TRACK)
+   { val cs      = castSession ?: return
+     val encoded = song.split ("/").joinToString ("/") { Uri.encode (it) }
+     val url     = "http://${getLocalIp ()}:8765/$encoded"
+     val fnt     = splitfn (song)
+     val meta    = CastMeta (CastMeta.MEDIA_TYPE_MUSIC_TRACK)
       meta.putString (CastMeta.KEY_TITLE,  fnt.ttl)
       meta.putString (CastMeta.KEY_ARTIST, fnt.grp)
-      val mi  = MediaInfo.Builder (url)
-                   .setStreamType  (MediaInfo.STREAM_TYPE_BUFFERED)
-                   .setContentType ("audio/mpeg")
-                   .setMetadata    (meta)
-                   .build ()
+     val mi  = MediaInfo.Builder (url)
+                  .setStreamType  (MediaInfo.STREAM_TYPE_BUFFERED)
+                  .setContentType ("audio/mpeg")
+                  .setMetadata    (meta)
+                  .build ()
       cs.remoteMediaClient?.load (
          MediaLoadRequestData.Builder ().setMediaInfo (mi).build ())
    }
 
    private fun regCastCb ()
-   {  val client = castSession?.remoteMediaClient ?: return
+   { val client = castSession?.remoteMediaClient ?: return
       castCb = object : RemoteMediaClient.Callback ()
       {  override fun onStatusUpdated ()
-         {  val ms = castSession?.remoteMediaClient?.mediaStatus ?: return
+         { val ms = castSession?.remoteMediaClient?.mediaStatus ?: return
             if (ms.playerState == MediaStatus.PLAYER_STATE_IDLE &&
                 ms.idleReason  == MediaStatus.IDLE_REASON_FINISHED)
                next ()
@@ -157,8 +157,8 @@ class MusicService: Service ()
          postNotification ()
       }
 
-      override fun onSessionResumed (
-         session: CastSession, wasSuspended: Boolean)
+      override fun onSessionResumed (session: CastSession,
+                                     wasSuspended: Boolean)
       {  castSession = session
          if (httpServer == null)
             httpServer = LocalHttpServer (path).also { it.start () }
@@ -394,7 +394,8 @@ class MusicService: Service ()
                mp3.find { it.dir == p }?.fn
                   ?.map { "$p/$it" }
                   ?.shuffled ()
-                  ?.let { if (it.isNotEmpty ()) buckets.add (it.toMutableList ()) }
+                  ?.let { if (it.isNotEmpty ())
+                             buckets.add (it.toMutableList ()) }
             }
          }
       // interleave round-robin across buckets
@@ -528,8 +529,8 @@ class MusicService: Service ()
          startForeground (NOTIF_ID, notif)
       }
       catch (e: Exception) {
-         // Android 12+ blocks startForeground() from background
-         // contexts (e.g. Cast callbacks) — swallow and continue
+      // Android 12+ blocks startForeground() from background
+      // contexts (e.g. Cast callbacks)  swallow so we don't die
       }
    }
 }

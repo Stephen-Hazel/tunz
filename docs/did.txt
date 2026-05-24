@@ -1,3 +1,7 @@
+2026May
+   song dir on shaz.app is, eh, not right - tossin it
+   put cast in here instead and taking out hooks to shaz.app/song
+
 2026Apr
    show song count
    button for lyrics pop
