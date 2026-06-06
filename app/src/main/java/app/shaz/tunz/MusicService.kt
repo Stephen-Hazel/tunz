@@ -241,7 +241,7 @@ class MusicService: Service ()
                                                                 mutableListOf ()
    // and our done list so we don't hear ANY repeats
       done = try {
-         File ("$path/done.txt").readLines ().toMutableList ()
+         File ("${File(path).parent}/done.txt").readLines ().toMutableList ()
       }
       catch (e: Exception) { mutableListOf () }
    // ok, list off each dir in path
@@ -315,7 +315,7 @@ class MusicService: Service ()
      val e = getSharedPreferences ("prf", MODE_PRIVATE).edit ()
       e.putBoolean   ("shuf", shuf).commit ()
       e.putStringSet ("pick", pick.toSet ()).commit ()
-      try { File ("$path/done.txt").writeText (done.joinToString ("\n")) }
+      try { File ("${File(path).parent}/done.txt").writeText (done.joinToString ("\n")) }
       catch (ex: Exception) { }
       try {
          CastContext.getSharedInstance (this)
