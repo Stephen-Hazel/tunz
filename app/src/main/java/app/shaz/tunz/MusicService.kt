@@ -213,6 +213,20 @@ class MusicService: Service ()
    override fun onCreate ()
    {  super.onCreate ()
 
+   // must call startForeground() fast or Android kills us when started
+   // from background (e.g. media button while screen is off)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val ch = NotificationChannel (CHANNEL_ID, "Playback",
+                                      NotificationManager.IMPORTANCE_LOW)
+         getSystemService (NotificationManager::class.java
+                                                ).createNotificationChannel (ch)
+      }
+      startForeground (NOTIF_ID,
+         NotificationCompat.Builder (this, CHANNEL_ID)
+            .setSmallIcon (R.drawable.outline_music_cast_24)
+            .setContentTitle ("Tunz")
+            .build ())
+
       mplay = MediaPlayer ()
       btDisco = BTDisco (mplay!!)
       registerReceiver (btDisco, intentFilter)
@@ -226,8 +240,10 @@ class MusicService: Service ()
       pick = p.getStringSet ("pick", emptySet ())?.toMutableList () ?:
                                                                 mutableListOf ()
    // and our done list so we don't hear ANY repeats
-      done = p.getStringSet ("done", emptySet ())?.toMutableList () ?:
-                                                                mutableListOf ()
+      done = try {
+         File ("$path/done.txt").readLines ().toMutableList ()
+      }
+      catch (e: Exception) { mutableListOf () }
    // ok, list off each dir in path
      val mus  = File (path).listFiles () ?: emptyArray ()
      val dir  = mutableListOf<String> ()
@@ -241,14 +257,6 @@ class MusicService: Service ()
         val ls: Array<String> = dl!!.map { it.getName () }.toTypedArray ()
          ls.sort ()
          mp3.add (FNList (d, ls.toMutableList ()))
-      }
-
-   // setup our foreground service junk
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        val ch = NotificationChannel (CHANNEL_ID, "Playback",
-                                      NotificationManager.IMPORTANCE_LOW)
-         getSystemService (NotificationManager::class.java
-                                                ).createNotificationChannel (ch)
       }
       mediaSession = MediaSessionCompat (this, "TunzSession").apply {
          setCallback (object: MediaSessionCompat.Callback ()
@@ -307,7 +315,8 @@ class MusicService: Service ()
      val e = getSharedPreferences ("prf", MODE_PRIVATE).edit ()
       e.putBoolean   ("shuf", shuf).commit ()
       e.putStringSet ("pick", pick.toSet ()).commit ()
-      e.putStringSet ("done", done.toSet ()).commit ()
+      try { File ("$path/done.txt").writeText (done.joinToString ("\n")) }
+      catch (ex: Exception) { }
       try {
          CastContext.getSharedInstance (this)
             .sessionManager.removeSessionManagerListener (
