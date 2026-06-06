@@ -249,7 +249,7 @@ class MusicService: Service ()
      val dir  = mutableListOf<String> ()
       for (i in mus.indices) {
         val dn = mus [i].getName ()
-         if (dn != ".thumbnails")  dir.add (dn)
+         if (dn != ".thumbnails" && mus [i].isDirectory)  dir.add (dn)
       }
       dir.sort ()
       dir.forEach { d ->
