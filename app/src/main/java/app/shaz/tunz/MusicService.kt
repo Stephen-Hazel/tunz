@@ -100,12 +100,18 @@ class MusicService: Service ()
 
    private fun getLocalIp (): String
    {  try {
-         NetworkInterface.getNetworkInterfaces ()?.toList ()?.forEach { iface ->
-            iface.inetAddresses?.toList ()?.forEach { addr ->
+        val ifaces = NetworkInterface.getNetworkInterfaces ()?.toList ()
+                     ?: return "127.0.0.1"
+      // prefer wlan so we don't hand the chromecast a cellular rmnet addr
+         for (iface in ifaces.filter { it.name.startsWith ("wlan") })
+            for (addr in iface.inetAddresses.toList ())
                if (! addr.isLoopbackAddress && addr is Inet4Address)
-                  return addr.hostAddress ?: "127.0.0.1"
-            }
-         }
+                  return addr.hostAddress ?: continue
+      // fallback
+         for (iface in ifaces)
+            for (addr in iface.inetAddresses.toList ())
+               if (! addr.isLoopbackAddress && addr is Inet4Address)
+                  return addr.hostAddress ?: continue
       }
       catch (e: Exception) { }
       return "127.0.0.1"

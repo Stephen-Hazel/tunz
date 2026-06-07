@@ -200,7 +200,7 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
       }
       b.btnLyr.setOnClickListener { s.lyricsSearch () }
       try {
-         CastButtonFactory.setUpMediaRouteButton (applicationContext, b.btnCast)
+         CastButtonFactory.setUpMediaRouteButton (this, b.btnCast)
       }
       catch (e: Exception) { }
       b.fab.setOnClickListener { view ->
