@@ -19,6 +19,7 @@ import android.provider.Settings
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.StyleSpan
+import android.view.KeyEvent
 import android.view.View
 import android.widget.CheckBox
 import android.widget.LinearLayout
@@ -275,6 +276,25 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
       if (req == 1 && results.any {
                it == PackageManager.PERMISSION_GRANTED })
          restartService ()
+   }
+
+
+   override fun dispatchKeyEvent (event: KeyEvent): Boolean
+   {  val s = svc
+      if (s != null && s.isCasting () &&
+          event.action == KeyEvent.ACTION_DOWN) {
+         when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> {
+               s.setCastVolume ((s.castVolume () + 0.05).coerceAtMost (1.0))
+               return true
+            }
+            KeyEvent.KEYCODE_VOLUME_DOWN -> {
+               s.setCastVolume ((s.castVolume () - 0.05).coerceAtLeast (0.0))
+               return true
+            }
+         }
+      }
+      return super.dispatchKeyEvent (event)
    }
 
 

@@ -96,7 +96,14 @@ class MusicService: Service ()
    fun removePick (dir: String) { pick.remove (dir) }
    fun setShuf    (v: Boolean)  { shuf = v }
 
-   private fun isCasting () = castSession?.isConnected == true
+   fun isCasting () = castSession?.isConnected == true
+
+   fun castVolume (): Double = castSession?.volume ?: 1.0
+
+   fun setCastVolume (vol: Double)
+   {  try { castSession?.setVolume (vol) }
+      catch (e: Exception) { }
+   }
 
    private fun getLocalIp (): String
    {  try {
