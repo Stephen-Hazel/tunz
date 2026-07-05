@@ -16,18 +16,21 @@ class LocalHttpServer (private val basePath: String) {
    private var running = false
 
    fun start ()
-   { val ss = ServerSocket (8765).also { it.reuseAddress = true }
-      serverSocket = ss
-      running = true
-      Thread {
-         while (running) {
-            try {
-              val client = ss.accept ()
-               Thread { handle (client) }.start ()
+   {  try {
+        val ss = ServerSocket (8765).also { it.reuseAddress = true }
+         serverSocket = ss
+         running = true
+         Thread {
+            while (running) {
+               try {
+                 val client = ss.accept ()
+                  Thread { handle (client) }.start ()
+               }
+               catch (e: Exception) { if (running)  Log.e ("HTTP", "accept", e) }
             }
-            catch (e: Exception) { if (running)  Log.e ("HTTP", "accept", e) }
-         }
-      }.start ()
+         }.start ()
+      }
+      catch (e: Exception) { Log.e ("HTTP", "start", e) }
    }
 
    fun stop ()

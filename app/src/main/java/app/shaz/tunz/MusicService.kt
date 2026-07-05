@@ -84,6 +84,8 @@ class MusicService: Service ()
    private var castSession: CastSession? = null
    private var httpServer: LocalHttpServer? = null
    private var castCb: RemoteMediaClient.Callback? = null
+   private var castErrorStreak = 0
+   private var localErrorStreak = 0
 
    private lateinit var mediaSession: MediaSessionCompat
 
@@ -109,7 +111,10 @@ class MusicService: Service ()
    private fun getLocalIp (): String
    {  try {
         val ifaces = NetworkInterface.getNetworkInterfaces ()?.toList ()
-                     ?: return "127.0.0.1"
+         if (ifaces == null) {
+            Log.w ("TunzCast", "no network interfaces, using loopback")
+            return "127.0.0.1"
+         }
       // prefer wlan so we don't hand the chromecast a cellular rmnet addr
          for (iface in ifaces.filter { it.name.startsWith ("wlan") })
             for (addr in iface.inetAddresses.toList ())
@@ -121,7 +126,8 @@ class MusicService: Service ()
                if (! addr.isLoopbackAddress && addr is Inet4Address)
                   return addr.hostAddress ?: continue
       }
-      catch (e: Exception) { }
+      catch (e: Exception) { Log.w ("TunzCast", "getLocalIp failed", e) }
+      Log.w ("TunzCast", "no usable ip found, using loopback")
       return "127.0.0.1"
    }
 
@@ -150,8 +156,18 @@ class MusicService: Service ()
          { val ms = castSession?.remoteMediaClient?.mediaStatus ?: return
             if (ms.playerState == MediaStatus.PLAYER_STATE_IDLE) {
                Log.d ("TunzCast", "idle reason=${ms.idleReason}")
-               if (ms.idleReason == MediaStatus.IDLE_REASON_FINISHED)
+               if (ms.idleReason == MediaStatus.IDLE_REASON_FINISHED) {
+                  castErrorStreak = 0
                   next ()
+               }
+            // load/playback failed - skip the dead track n keep going,
+            // but give up after a few in a row so a real outage doesn't
+            // burn through the whole playlist
+               else if (ms.idleReason == MediaStatus.IDLE_REASON_ERROR) {
+                  castErrorStreak++
+                  Log.d ("TunzCast", "error streak=$castErrorStreak")
+                  if (castErrorStreak <= 3)  next ()
+               }
             }
          }
       }
@@ -166,6 +182,7 @@ class MusicService: Service ()
    private val castListener = object : SessionManagerListener<CastSession>
    {  override fun onSessionStarted (session: CastSession, id: String)
       {  castSession = session
+         castErrorStreak = 0
          httpServer  = LocalHttpServer (path).also { it.start () }
          mplay?.pause ()
          if (song.isNotEmpty ())  loadCastSong ()
@@ -196,20 +213,25 @@ class MusicService: Service ()
                mplay?.setDataSource ("$path/$song")
                mplay?.prepare ()
                mplay?.start ()
-               mplay?.setOnCompletionListener { next () }
+               mplay?.setOnCompletionListener { localErrorStreak = 0; next () }
             }
-            catch (e: Exception) { }
+            catch (e: Exception) {
+               Log.e ("TunzLocal", "fallback playback failed for $song", e)
+            }
          }
          updateMediaSession ()
          postNotification ()
       }
 
       override fun onSessionStarting    (s: CastSession) {}
-      override fun onSessionStartFailed (s: CastSession, e: Int) {}
+      override fun onSessionStartFailed (s: CastSession, e: Int)
+      {  Log.e ("TunzCast", "session start failed error=$e") }
       override fun onSessionEnding      (s: CastSession) {}
       override fun onSessionResuming    (s: CastSession, id: String) {}
-      override fun onSessionResumeFailed(s: CastSession, e: Int) {}
-      override fun onSessionSuspended   (s: CastSession, r: Int) {}
+      override fun onSessionResumeFailed(s: CastSession, e: Int)
+      {  Log.e ("TunzCast", "session resume failed error=$e") }
+      override fun onSessionSuspended   (s: CastSession, r: Int)
+      {  Log.d ("TunzCast", "session suspended reason=$r") }
    }
 
    fun togglePlayPause ()
@@ -246,6 +268,12 @@ class MusicService: Service ()
             .build ())
 
       mplay = MediaPlayer ()
+      mplay!!.setOnErrorListener { _, what, extra ->
+         Log.e ("TunzLocal", "player error what=$what extra=$extra")
+         localErrorStreak++
+         if (localErrorStreak <= 3)  next ()
+         true
+      }
       btDisco = BTDisco (mplay!!)
       registerReceiver (btDisco, intentFilter)
 
@@ -448,10 +476,17 @@ class MusicService: Service ()
       loadAlbumArt ()
       if (isCasting ())  loadCastSong ()
       else {
-         mplay?.setDataSource ("$path/$song")
-         mplay?.prepare ()
-         mplay?.start ()
-         mplay?.setOnCompletionListener { next () }
+         try {
+            mplay?.setDataSource ("$path/$song")
+            mplay?.prepare ()
+            mplay?.start ()
+            mplay?.setOnCompletionListener { localErrorStreak = 0; next () }
+         }
+         catch (e: Exception) {
+            Log.e ("TunzLocal", "prepare failed for $song", e)
+            localErrorStreak++
+            if (localErrorStreak <= 3)  next ()
+         }
       }
       updateMediaSession ()
       postNotification ()
@@ -478,10 +513,17 @@ class MusicService: Service ()
          loadAlbumArt ()
          if (isCasting ())  loadCastSong ()
          else {
-            mplay?.setDataSource ("$path/$song")
-            mplay?.prepare ()
-            mplay?.start ()
-            mplay?.setOnCompletionListener { next () }
+            try {
+               mplay?.setDataSource ("$path/$song")
+               mplay?.prepare ()
+               mplay?.start ()
+               mplay?.setOnCompletionListener { localErrorStreak = 0; next () }
+            }
+            catch (e: Exception) {
+               Log.e ("TunzLocal", "prepare failed for $song", e)
+               localErrorStreak++
+               if (localErrorStreak <= 3)  next ()
+            }
          }
          updateMediaSession ()
          postNotification ()
