@@ -20,7 +20,9 @@ import android.media.MediaPlayer
 import android.os.Binder
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -29,6 +31,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media.session.MediaButtonReceiver
+import androidx.mediarouter.media.MediaRouter
+import com.google.android.gms.cast.CastDevice
+import com.google.android.gms.cast.CastStatusCodes
 import com.google.android.gms.cast.MediaInfo
 import com.google.android.gms.cast.MediaLoadRequestData
 import com.google.android.gms.cast.MediaMetadata  as CastMeta
@@ -86,6 +91,9 @@ class MusicService: Service ()
    private var castCb: RemoteMediaClient.Callback? = null
    private var castErrorStreak = 0
    private var localErrorStreak = 0
+   private var lastCastDeviceId: String? = null
+   private var reconnectAttempts = 0
+   private val reconnectHandler = Handler (Looper.getMainLooper ())
 
    private lateinit var mediaSession: MediaSessionCompat
 
@@ -179,10 +187,36 @@ class MusicService: Service ()
       castCb = null
    }
 
+   private fun tryReconnectCast ()
+   // an active cast session died unexpectedly - reselect the same
+   // route to get the framework to reconnect us, rather than ever
+   // falling back to the phone speaker while we think we're casting
+   { val deviceId = lastCastDeviceId ?: return
+     val router   = MediaRouter.getInstance (this)
+     val route    = router.routes.firstOrNull {
+        CastDevice.getFromBundle (it.extras)?.deviceId == deviceId
+     }
+      if (route != null) {
+         Log.d ("TunzCast", "reconnecting to $deviceId")
+         router.selectRoute (route)
+         return
+      }
+      reconnectAttempts++
+      if (reconnectAttempts <= 5) {
+         Log.d ("TunzCast",
+                "device $deviceId not found, retry $reconnectAttempts/5")
+         reconnectHandler.postDelayed ({ tryReconnectCast () }, 3000)
+      }
+      else  Log.w ("TunzCast", "giving up reconnecting to $deviceId")
+   }
+
    private val castListener = object : SessionManagerListener<CastSession>
    {  override fun onSessionStarted (session: CastSession, id: String)
       {  castSession = session
          castErrorStreak = 0
+         reconnectAttempts = 0
+         reconnectHandler.removeCallbacksAndMessages (null)
+         lastCastDeviceId = session.castDevice?.deviceId
          httpServer  = LocalHttpServer (path).also { it.start () }
          mplay?.pause ()
          if (song.isNotEmpty ())  loadCastSong ()
@@ -194,6 +228,9 @@ class MusicService: Service ()
       override fun onSessionResumed (session: CastSession,
                                      wasSuspended: Boolean)
       {  castSession = session
+         reconnectAttempts = 0
+         reconnectHandler.removeCallbacksAndMessages (null)
+         lastCastDeviceId = session.castDevice?.deviceId
          if (httpServer == null)
             httpServer = LocalHttpServer (path).also { it.start () }
          if (song.isNotEmpty ())  loadCastSong ()
@@ -207,17 +244,27 @@ class MusicService: Service ()
          castSession = null
          httpServer?.stop ()
          httpServer = null
-         if (song.isNotEmpty ()) {
-            mplay?.reset ()
-            try {
-               mplay?.setDataSource ("$path/$song")
-               mplay?.prepare ()
-               mplay?.start ()
-               mplay?.setOnCompletionListener { localErrorStreak = 0; next () }
+      // a clean, user-requested disconnect falls back to the phone
+      // speaker same as always. anything else (dropped wifi, etc) tries
+      // to get back onto the same cast device instead of ever playing
+      // out the phone speaker while we still think we're casting
+         if (error == CastStatusCodes.SUCCESS) {
+            if (song.isNotEmpty ()) {
+               mplay?.reset ()
+               try {
+                  mplay?.setDataSource ("$path/$song")
+                  mplay?.prepare ()
+                  mplay?.start ()
+                  mplay?.setOnCompletionListener { localErrorStreak = 0; next () }
+               }
+               catch (e: Exception) {
+                  Log.e ("TunzLocal", "fallback playback failed for $song", e)
+               }
             }
-            catch (e: Exception) {
-               Log.e ("TunzLocal", "fallback playback failed for $song", e)
-            }
+         }
+         else {
+            reconnectAttempts = 0
+            tryReconnectCast ()
          }
          updateMediaSession ()
          postNotification ()
@@ -352,6 +399,7 @@ class MusicService: Service ()
    // shut it all down
    {  super.onDestroy ()
       unregisterReceiver (btDisco)
+      reconnectHandler.removeCallbacksAndMessages (null)
       if (mplay?.isPlaying == true)  mplay?.stop ()
       mplay?.release ()
       mplay = null
