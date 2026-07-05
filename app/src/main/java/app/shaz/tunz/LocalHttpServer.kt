@@ -37,7 +37,8 @@ class LocalHttpServer (private val basePath: String) {
    }
 
    private fun handle (sock: Socket)
-   {  try {
+   { var uri: String? = null
+      try {
         val br    = BufferedReader (InputStreamReader (sock.getInputStream ()))
         val lines = mutableListOf<String> ()
         var line  = br.readLine ()
@@ -46,7 +47,8 @@ class LocalHttpServer (private val basePath: String) {
          }
         val parts   = lines.firstOrNull ()?.split (" ") ?: return
         val rawPath = parts.getOrNull (1) ?: return
-        val uri     = URLDecoder.decode (rawPath.trimStart ('/'), "UTF-8")
+         uri = URLDecoder.decode (rawPath.trimStart ('/'), "UTF-8")
+         Log.d ("HTTP", "request $uri")
         val file    = File ("$basePath/$uri")
         val out     = sock.getOutputStream ()
          if (! file.exists () || ! file.isFile) {
@@ -80,7 +82,7 @@ class LocalHttpServer (private val basePath: String) {
          }
          out.flush ()
       }
-      catch (e: Exception) { }
+      catch (e: Exception) { Log.e ("HTTP", "handle $uri", e) }
       finally { try { sock.close () } catch (e: Exception) { } }
    }
 

@@ -26,6 +26,7 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media.session.MediaButtonReceiver
 import com.google.android.gms.cast.MediaInfo
@@ -128,6 +129,7 @@ class MusicService: Service ()
    { val cs      = castSession ?: return
      val encoded = song.split ("/").joinToString ("/") { Uri.encode (it) }
      val url     = "http://${getLocalIp ()}:8765/$encoded"
+      Log.d ("TunzCast", "loading $url")
      val fnt     = splitfn (song)
      val meta    = CastMeta (CastMeta.MEDIA_TYPE_MUSIC_TRACK)
       meta.putString (CastMeta.KEY_TITLE,  fnt.ttl)
@@ -146,9 +148,11 @@ class MusicService: Service ()
       castCb = object : RemoteMediaClient.Callback ()
       {  override fun onStatusUpdated ()
          { val ms = castSession?.remoteMediaClient?.mediaStatus ?: return
-            if (ms.playerState == MediaStatus.PLAYER_STATE_IDLE &&
-                ms.idleReason  == MediaStatus.IDLE_REASON_FINISHED)
-               next ()
+            if (ms.playerState == MediaStatus.PLAYER_STATE_IDLE) {
+               Log.d ("TunzCast", "idle reason=${ms.idleReason}")
+               if (ms.idleReason == MediaStatus.IDLE_REASON_FINISHED)
+                  next ()
+            }
          }
       }
       client.registerCallback (castCb!!)
@@ -181,7 +185,8 @@ class MusicService: Service ()
       }
 
       override fun onSessionEnded (session: CastSession, error: Int)
-      {  unregCastCb ()
+      {  Log.d ("TunzCast", "session ended error=$error")
+         unregCastCb ()
          castSession = null
          httpServer?.stop ()
          httpServer = null
@@ -547,13 +552,13 @@ class MusicService: Service ()
                               .setShowActionsInCompactView (0, 1))
         .build ()
 
+   // service is already foreground from onCreate() - just update the
+   // existing notification instead of re-requesting promotion, which
+   // Android 12+ denies once the app has left the TOP state
       try {
-         startForeground (NOTIF_ID, notif)
+         NotificationManagerCompat.from (this).notify (NOTIF_ID, notif)
       }
-      catch (e: Exception) {
-      // Android 12+ blocks startForeground() from background
-      // contexts (e.g. Cast callbacks)  swallow so we don't die
-      }
+      catch (e: Exception) { }
    }
 }
 
