@@ -15,6 +15,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.AudioManager
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.os.Binder
@@ -88,6 +89,7 @@ class MusicService: Service ()
    private var albumArt: Bitmap? = null
    private var castSession: CastSession? = null
    private var httpServer: LocalHttpServer? = null
+   private var wifiLock: WifiManager.WifiLock? = null
    private var castCb: RemoteMediaClient.Callback? = null
    private var castErrorStreak = 0
    private var localErrorStreak = 0
@@ -182,9 +184,40 @@ class MusicService: Service ()
       client.registerCallback (castCb!!)
    }
 
+   private fun handleHttpStreamError (uri: String)
+   // the http server has its own failures (dropped connection, etc)
+   // that never reach us via a cast status update - runs on the
+   // server's handler thread, so hop back to main before touching
+   // any playback state
+   {  reconnectHandler.post {
+        if (isCasting () && uri == song) {
+            castErrorStreak++
+            Log.d ("TunzCast", "http stream error streak=$castErrorStreak")
+            if (castErrorStreak <= 3)  next ()
+         }
+      }
+   }
+
    private fun unregCastCb ()
    {  castCb?.let { castSession?.remoteMediaClient?.unregisterCallback (it) }
       castCb = null
+   }
+
+   private fun acquireWifiLock ()
+   // wifi radio power-saves when the screen is off, which can stall
+   // our http server for tens of seconds between beacon wakeups -
+   // keep it awake for as long as we're serving to the cast device
+   {  if (wifiLock?.isHeld == true)  return
+     val wm = applicationContext
+                 .getSystemService (Context.WIFI_SERVICE) as WifiManager
+      wifiLock = wm.createWifiLock (WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                                    "tunz:cast")
+      wifiLock?.acquire ()
+   }
+
+   private fun releaseWifiLock ()
+   {  if (wifiLock?.isHeld == true)  wifiLock?.release ()
+      wifiLock = null
    }
 
    private fun tryReconnectCast ()
@@ -217,7 +250,11 @@ class MusicService: Service ()
          reconnectAttempts = 0
          reconnectHandler.removeCallbacksAndMessages (null)
          lastCastDeviceId = session.castDevice?.deviceId
-         httpServer  = LocalHttpServer (path).also { it.start () }
+         httpServer  = LocalHttpServer (path).also {
+            it.start ()
+            it.onStreamError = { uri -> handleHttpStreamError (uri) }
+         }
+         acquireWifiLock ()
          mplay?.pause ()
          if (song.isNotEmpty ())  loadCastSong ()
          regCastCb ()
@@ -232,7 +269,11 @@ class MusicService: Service ()
          reconnectHandler.removeCallbacksAndMessages (null)
          lastCastDeviceId = session.castDevice?.deviceId
          if (httpServer == null)
-            httpServer = LocalHttpServer (path).also { it.start () }
+            httpServer = LocalHttpServer (path).also {
+               it.start ()
+               it.onStreamError = { uri -> handleHttpStreamError (uri) }
+            }
+         acquireWifiLock ()
          if (song.isNotEmpty ())  loadCastSong ()
          regCastCb ()
          mplay?.pause ()
@@ -244,6 +285,7 @@ class MusicService: Service ()
          castSession = null
          httpServer?.stop ()
          httpServer = null
+         releaseWifiLock ()
       // a clean, user-requested disconnect falls back to the phone
       // speaker same as always. anything else (dropped wifi, etc) tries
       // to get back onto the same cast device instead of ever playing
@@ -418,6 +460,7 @@ class MusicService: Service ()
       }
       catch (ex: Exception) { }
       httpServer?.stop ()
+      releaseWifiLock ()
    }
 
 

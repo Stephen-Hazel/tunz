@@ -17,6 +17,7 @@ class LocalHttpServer (private val basePath: String) {
    private var serverSocket: ServerSocket? = null
    private var running = false
    private val clients = CopyOnWriteArraySet<Socket> ()
+   var onStreamError: ((String) -> Unit)? = null
 
    fun start ()
    {  try {
@@ -100,7 +101,10 @@ class LocalHttpServer (private val basePath: String) {
          if (sent == wanted)  Log.d ("HTTP", "sent $sent/$wanted $uri")
          else  Log.w ("HTTP", "short write $sent/$wanted $uri")
       }
-      catch (e: Exception) { Log.e ("HTTP", "handle $uri", e) }
+      catch (e: Exception) {
+         Log.e ("HTTP", "handle $uri", e)
+         uri?.let { onStreamError?.invoke (it) }
+      }
       finally {
          clients.remove (sock)
          try { sock.close () } catch (e: Exception) { }
