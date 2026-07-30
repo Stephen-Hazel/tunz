@@ -403,9 +403,6 @@ class MusicService: Service ()
          if (localErrorStreak <= 3)  next ()
          true
       }
-      btDisco = BTDisco (mplay!!)
-      registerReceiver (btDisco, intentFilter)
-
    // all our mp3 files are in single level dirs under /Music/tunz
       path = Environment.getExternalStorageDirectory ().toString () +
                                                                    "/Music/tunz"
@@ -457,6 +454,9 @@ class MusicService: Service ()
          })
          isActive = true
       }
+
+      btDisco = BTDisco (mplay!!) { mediaSession.controller.transportControls.pause () }
+      registerReceiver (btDisco, intentFilter)
 
       try {
         val cc = CastContext.getSharedInstance (this)
@@ -747,13 +747,14 @@ class MusicService: Service ()
 }
 
 
-class BTDisco (private val mp: MediaPlayer): BroadcastReceiver ()
+class BTDisco (private val mp: MediaPlayer,
+               private val onNoisy: () -> Unit): BroadcastReceiver ()
 // if bluetooth disconnects, don't keep playin !!
 {  override fun onReceive (context: Context, intent: Intent)
    {  if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
          Dbg.log ("TunzSkip",
                   "audio becoming noisy, isPlaying=${mp.isPlaying}")
-         if (mp.isPlaying)  mp.pause ()
+         if (mp.isPlaying)  onNoisy ()
       }
    }
 }
