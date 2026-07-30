@@ -28,6 +28,7 @@ import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
+import android.view.KeyEvent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.media.app.NotificationCompat.MediaStyle
@@ -46,6 +47,9 @@ import com.google.android.gms.cast.framework.media.RemoteMediaClient
 import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 
 // setup play/pause/skip api
@@ -53,6 +57,38 @@ const val ACTION_PLAY_PAUSE = "app.shaz.tunz.PLAY_PAUSE"
 const val ACTION_NEXT       = "app.shaz.tunz.NEXT"
 const val CHANNEL_ID        = "tunz_playback"
 const val NOTIF_ID          = 1
+
+
+object Dbg
+// permanent on-device log for chasing intermittent bugs (bt/assistant
+// skip weirdness etc) - a plain file survives days between adb
+// sessions, unlike the logcat ring buffer
+{  private var file: File? = null
+   private val fmt = SimpleDateFormat ("MM-dd HH:mm:ss", Locale.US)
+   private const val MAX_BYTES  = 1_000_000L
+   private const val KEEP_BYTES = 500_000
+
+   fun init (dir: String)
+   {  val f = File ("$dir/tunz_debug.log")
+      try {
+         if (f.exists () && f.length () > MAX_BYTES)
+            f.writeText (f.readText ().takeLast (KEEP_BYTES))
+      }
+      catch (e: Exception) { }
+      file = f
+   }
+
+   fun log (tag: String, msg: String)
+   {  Log.d (tag, msg)
+     val f = file ?: return
+      synchronized (this) {
+         try {
+            f.appendText ("${fmt.format (Date ())} $tag: $msg\n")
+         }
+         catch (e: Exception) { }
+      }
+   }
+}
 
 
 interface PlaybackCallback {
@@ -323,19 +359,23 @@ class MusicService: Service ()
       {  Log.d ("TunzCast", "session suspended reason=$r") }
    }
 
-   fun togglePlayPause ()
-   {  if (isCasting ()) {
-        val client = castSession!!.remoteMediaClient ?: return
-        val state  = client.mediaStatus?.playerState
-         if (state == MediaStatus.PLAYER_STATE_PLAYING)  client.pause (null)
-         else                                            client.play  (null)
+   fun togglePlayPause (): Boolean
+   {  val wasPlaying: Boolean
+      if (isCasting ()) {
+        val client = castSession!!.remoteMediaClient ?: return false
+         wasPlaying = client.mediaStatus?.playerState ==
+                                            MediaStatus.PLAYER_STATE_PLAYING
+         if (wasPlaying)  client.pause (null)
+         else             client.play  (null)
       }
       else {
-         if (mplay?.isPlaying == true)  mplay?.pause ()
-         else                           mplay?.start ()
+         wasPlaying = mplay?.isPlaying == true
+         if (wasPlaying)  mplay?.pause ()
+         else             mplay?.start ()
       }
       updateMediaSession ()
       postNotification ()
+      return ! wasPlaying
    }
 
 
@@ -369,6 +409,7 @@ class MusicService: Service ()
    // all our mp3 files are in single level dirs under /Music/tunz
       path = Environment.getExternalStorageDirectory ().toString () +
                                                                    "/Music/tunz"
+      Dbg.init (File (path).parent !!)
    // load shuf,picked dirs from last time
      val p = getSharedPreferences ("prf", MODE_PRIVATE)
       shuf = p.getBoolean   ("shuf", true)
@@ -396,19 +437,22 @@ class MusicService: Service ()
       mediaSession = MediaSessionCompat (this, "TunzSession").apply {
          setCallback (object: MediaSessionCompat.Callback ()
          {  override fun onPlay ()
-            {  mplay?.start ()
+            {  Dbg.log ("TunzSkip", "onPlay")
+               mplay?.start ()
                updateMediaSession ()
                postNotification ()
             }
 
             override fun onPause ()
-            {  mplay?.pause ()
+            {  Dbg.log ("TunzSkip", "onPause")
+               mplay?.pause ()
                updateMediaSession ()
                postNotification ()
             }
 
             override fun onSkipToNext ()
-            {  next ()
+            {  Dbg.log ("TunzSkip", "onSkipToNext")
+               next ()
             }
          })
          isActive = true
@@ -428,7 +472,10 @@ class MusicService: Service ()
    override fun onBind (intent: Intent): IBinder = binder
 
    override fun onStartCommand (intent: Intent?, flags: Int, startId: Int): Int
-   {  MediaButtonReceiver.handleIntent (mediaSession, intent)
+   {  val key = intent?.getParcelableExtra (Intent.EXTRA_KEY_EVENT) as? KeyEvent
+      Dbg.log ("TunzSkip",
+               "onStartCommand action=${intent?.action} key=${key?.keyCode}")
+      MediaButtonReceiver.handleIntent (mediaSession, intent)
       when (intent?.action) {
          ACTION_PLAY_PAUSE -> togglePlayPause ()
          ACTION_NEXT       -> next ()
@@ -587,7 +634,9 @@ class MusicService: Service ()
 
    fun next (row: Int = -1)
    // row set if song table got doubleclicked.  else itsa neeext
-   {  mplay?.stop ()
+   {  Dbg.log ("TunzSkip",
+               "next enter row=$row ppos=$ppos playSize=${play.size}")
+      mplay?.stop ()
       mplay?.reset ()
      val removedPos: Int
       if (row == -1) {
@@ -619,6 +668,8 @@ class MusicService: Service ()
          updateMediaSession ()
          postNotification ()
       }
+      Dbg.log ("TunzSkip",
+               "next exit ppos=$ppos playSize=${play.size} song=$song")
       callback?.onSongChanged (removedPos, ppos)
    }
 
@@ -699,7 +750,10 @@ class MusicService: Service ()
 class BTDisco (private val mp: MediaPlayer): BroadcastReceiver ()
 // if bluetooth disconnects, don't keep playin !!
 {  override fun onReceive (context: Context, intent: Intent)
-   {  if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+   {  if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+         Dbg.log ("TunzSkip",
+                  "audio becoming noisy, isPlaying=${mp.isPlaying}")
          if (mp.isPlaying)  mp.pause ()
+      }
    }
 }

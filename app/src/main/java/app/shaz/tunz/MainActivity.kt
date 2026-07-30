@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.IBinder
+import android.os.PowerManager
 import android.provider.Settings
 import android.text.Spannable
 import android.text.SpannableString
@@ -205,9 +206,10 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
       }
       catch (e: Exception) { }
       b.fab.setOnClickListener { view ->
-         Snackbar.make (view, "play/pause", Snackbar.LENGTH_LONG)
+        val playing = s.togglePlayPause ()
+         Snackbar.make (view, if (playing) "Playing" else "Paused",
+                        Snackbar.LENGTH_LONG)
                  .setAction ("Action", null).setAnchorView (R.id.fab).show ()
-         s.togglePlayPause ()
       }
    }
 
@@ -246,6 +248,14 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
          startActivity (Intent (
             Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri))
       }
+
+   // let android know it's ok to keep runnin us in the background so
+   // doze/app-standby don't kill playback when the screen locks
+     val pm = getSystemService (POWER_SERVICE) as PowerManager
+      if (! pm.isIgnoringBatteryOptimizations (packageName))
+         startActivity (Intent (
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse ("package:$packageName")))
    }
 
 
