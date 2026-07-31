@@ -94,6 +94,27 @@ fun fmtfn (fn: String): SpannableString
 }
 
 
+fun renameRating (fn: String, rating: String): String
+// swap the rating suffix on a filename, keeping everything before it
+{  val base = fn.removeSuffix (".mp3")
+  val idx  = base.lastIndexOf ("-")
+   if (idx == -1)  return fn
+  val prefix = base.substring (0, idx).trimEnd ()
+   return "$prefix - $rating.mp3"
+}
+
+
+val RATINGS = listOf ("a", "b", "aAn", "bAn", "aSt", "bSt", "sing")
+
+
+fun aSplit (vals: List<String>): Pair<List<String>, List<String>>
+// row1 gets the a* values, row2 gets the rest, both alphabetical
+{  val row1 = vals.filter {   it.startsWith ("a") }.sorted ()
+  val row2 = vals.filter { ! it.startsWith ("a") }.sorted ()
+   return Pair (row1, row2)
+}
+
+
 class MainActivity: AppCompatActivity (), PlaybackCallback
 {  private lateinit var b: ActivityMainBinding
    private var svc: MusicService? = null
@@ -140,6 +161,7 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
             }
             b.loTbl.addView (tr)
          }
+         updateRatingRow ()
       }
    }
 
@@ -171,6 +193,7 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
          tr.setBackgroundColor (0xFF3848AF.toInt ())
          tr.requestFocus ()
          selRow = tr as? TableRow
+         updateRatingRow ()
       }
    }
 
@@ -182,24 +205,9 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
          s.setShuf (chk)
          s.rePlay ()
       }
-      for (i in b.loLin.childCount - 1 downTo 0)
-         if (b.loLin.getChildAt (i).id != b.cbShuf.id)
-            b.loLin.removeViewAt (i)
-      s.mp3.forEach { m ->
-           val cb = CheckBox (this)
-            cb.text = m.dir
-            cb.id = View.generateViewId ()
-            cb.isChecked = s.pick.contains (m.dir)
-            cb.layoutParams = LinearLayout.LayoutParams (
-               LinearLayout.LayoutParams.WRAP_CONTENT,
-               LinearLayout.LayoutParams.WRAP_CONTENT)
-            cb.setOnCheckedChangeListener { cb, chk ->
-               if (chk)  s.addPick    (cb.text as String)
-               else      s.removePick (cb.text as String)
-               s.rePlay ()
-            }
-            b.loLin.addView (cb)
-      }
+     val (dirs1, dirs2) = aSplit (s.mp3.map { it.dir })
+      fillCheckRow (b.loLin1, dirs1)
+      fillCheckRow (b.loLin2, dirs2)
       b.btnLyr.setOnClickListener { s.lyricsSearch () }
       try {
          CastButtonFactory.setUpMediaRouteButton (this, b.btnCast)
@@ -211,6 +219,76 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
                         Snackbar.LENGTH_LONG)
                  .setAction ("Action", null).setAnchorView (R.id.fab).show ()
       }
+   }
+
+
+   private fun fillCheckRow (row: LinearLayout, dirs: List<String>)
+   {  val s = svc ?: return
+      row.removeAllViews ()
+      dirs.forEach { d ->
+        val cb = CheckBox (this)
+         cb.text = d
+         cb.id = View.generateViewId ()
+         cb.isChecked = s.pick.contains (d)
+         cb.layoutParams = LinearLayout.LayoutParams (
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT)
+         cb.setOnCheckedChangeListener { cb, chk ->
+            if (chk)  s.addPick    (cb.text as String)
+            else      s.removePick (cb.text as String)
+            s.rePlay ()
+         }
+         row.addView (cb)
+      }
+   }
+
+
+   private fun fillRatingRow (row: LinearLayout, ratings: List<String>,
+                              cur: String)
+   {  val s = svc ?: return
+      row.removeAllViews ()
+      ratings.forEach { r ->
+        val tv = TextView (this)
+         tv.text = r
+         tv.textSize = 20f
+         tv.setPadding (28, 20, 28, 20)
+         if (r == cur) {
+            tv.setTextColor (Color.GRAY)
+            tv.isClickable = false
+            tv.isFocusable = false
+         }
+         else {
+            tv.setTextColor (Color.WHITE)
+            tv.isClickable = true
+            tv.isFocusable = true
+            tv.setOnClickListener {
+              val newFn = s.rateSong (r)
+               if (newFn != null) {
+                 val tr  = b.loTbl.getChildAt (s.ppos) as? TableRow
+                 val tv2 = tr?.getChildAt (0) as? TextView
+                  tv2?.text = fmtfn (newFn)
+                  updateRatingRow ()
+               }
+            }
+         }
+         row.addView (tv)
+      }
+   }
+
+
+   private fun updateRatingRow ()
+   // "set rating" buttons, two rows, shown after shuf/lyr til the next
+   // song.  the song's current rating is greyed out n disabled
+   {  val s = svc ?: return
+      if (s.song.isEmpty ()) {
+         b.svRate.visibility = View.GONE
+         return
+      }
+     val cur = splitfn (s.song).dir
+     val (row1, row2) = aSplit (RATINGS)
+      fillRatingRow (b.loRate1, row1, cur)
+      fillRatingRow (b.loRate2, row2, cur)
+      b.svRate.visibility = View.VISIBLE
    }
 
 

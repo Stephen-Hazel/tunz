@@ -88,6 +88,17 @@ object Dbg
          catch (e: Exception) { }
       }
    }
+
+   fun installCrashLogger ()
+   // catch crashes we didn't think to log for ourselves - a dead
+   // service mid-drive should always leave a trace
+   {  val prev = Thread.getDefaultUncaughtExceptionHandler ()
+      Thread.setDefaultUncaughtExceptionHandler { thread, e ->
+         log ("TunzCrash", "uncaught in ${thread.name}: " +
+                            Log.getStackTraceString (e))
+         prev?.uncaughtException (thread, e)
+      }
+   }
 }
 
 
@@ -337,6 +348,8 @@ class MusicService: Service ()
                }
                catch (e: Exception) {
                   Log.e ("TunzLocal", "fallback playback failed for $song", e)
+                  Dbg.log ("TunzLocal",
+                           "fallback playback failed for $song: $e")
                }
             }
          }
@@ -399,6 +412,8 @@ class MusicService: Service ()
       mplay = MediaPlayer ()
       mplay!!.setOnErrorListener { _, what, extra ->
          Log.e ("TunzLocal", "player error what=$what extra=$extra")
+         Dbg.log ("TunzLocal",
+                  "player error what=$what extra=$extra song=$song")
          localErrorStreak++
          if (localErrorStreak <= 3)  next ()
          true
@@ -407,20 +422,44 @@ class MusicService: Service ()
       path = Environment.getExternalStorageDirectory ().toString () +
                                                                    "/Music/tunz"
       Dbg.init (File (path).parent !!)
+      Dbg.installCrashLogger ()
    // load shuf,picked dirs from last time
      val p = getSharedPreferences ("prf", MODE_PRIVATE)
       shuf = p.getBoolean   ("shuf", true)
       pick = p.getStringSet ("pick", emptySet ())?.toMutableList () ?:
                                                                 mutableListOf ()
+   // one-time rating scheme migration: _a/_b/An/St -> a/b/aAn/aSt
+     val ratingMigration = mapOf (
+        "_a" to "a", "_b" to "b", "An" to "aAn", "St" to "aSt")
+      pick = pick.map { ratingMigration [it] ?: it }.distinct ()
+                                                            .toMutableList ()
    // and our done list so we don't hear ANY repeats
       done = try {
          File ("${File(path).parent}/done.txt").readLines ().toMutableList ()
       }
       catch (e: Exception) { mutableListOf () }
-   // ok, list off every mp3 n bucket it by its rating suffix
+   // ok, list off every mp3, migrate old ratings, n bucket by suffix
      val mus = File (path).listFiles () ?: emptyArray ()
      val fns = mus.filter { it.isFile && it.getName ().endsWith (".mp3") }
-                                              .map { it.getName () }.sorted ()
+                  .map { f ->
+                    val old  = f.getName ()
+                    val newR = ratingMigration [splitfn (old).dir]
+                     if (newR == null)  old
+                     else {
+                       val newName = renameRating (old, newR)
+                        if (File (path, newName).exists ()) {
+                           Log.w ("TunzRate",
+                                  "migration skip, exists: $newName")
+                           old
+                        }
+                        else if (f.renameTo (File (path, newName)))
+                              newName
+                        else {
+                           Log.w ("TunzRate", "migration rename failed: $old")
+                           old
+                        }
+                     }
+                  }.sorted ()
       fns.groupBy { splitfn (it).dir }.toSortedMap ().forEach { (d, ls) ->
          mp3.add (FNList (d, ls.toMutableList ()))
       }
@@ -613,6 +652,7 @@ class MusicService: Service ()
          }
          catch (e: Exception) {
             Log.e ("TunzLocal", "prepare failed for $song", e)
+            Dbg.log ("TunzLocal", "prepare failed for $song: $e")
             localErrorStreak++
             if (localErrorStreak <= 3)  next ()
          }
@@ -652,6 +692,7 @@ class MusicService: Service ()
             }
             catch (e: Exception) {
                Log.e ("TunzLocal", "prepare failed for $song", e)
+               Dbg.log ("TunzLocal", "prepare failed for $song: $e")
                localErrorStreak++
                if (localErrorStreak <= 3)  next ()
             }
@@ -662,6 +703,34 @@ class MusicService: Service ()
       Dbg.log ("TunzSkip",
                "next exit ppos=$ppos playSize=${play.size} song=$song")
       callback?.onSongChanged (removedPos, ppos)
+   }
+
+
+   fun rateSong (rating: String): String?
+   // rename the playing song's rating suffix, keep it playing til next ()
+   {  if (song.isEmpty ())  return null
+     val oldFn     = song
+     val oldRating = splitfn (oldFn).dir
+     val newFn     = renameRating (oldFn, rating)
+      if (newFn == oldFn)  return oldFn
+      if (File (path, newFn).exists ()) {
+         Log.w ("TunzRate", "rate skip, exists: $newFn")
+         return null
+      }
+      if (! File (path, oldFn).renameTo (File (path, newFn))) {
+         Log.w ("TunzRate", "rate rename failed: $oldFn -> $newFn")
+         return null
+      }
+      play [ppos] = newFn
+      song = newFn
+      mp3.find { it.dir == oldRating }?.fn?.remove (oldFn)
+     var bucket = mp3.find { it.dir == rating }
+      if (bucket == null) {
+         bucket = FNList (rating, mutableListOf ())
+         mp3.add (bucket)
+      }
+      bucket.fn.add (newFn)
+      return newFn
    }
 
 
