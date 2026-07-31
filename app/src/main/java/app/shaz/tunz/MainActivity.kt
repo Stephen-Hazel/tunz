@@ -56,9 +56,9 @@ fun substr (s: String, b: Int, l: Int): String
 
 fun splitfn (fn: String): FNTitle
 { var s = fn
-  val d = s.substringBefore ("/")
-   s =    s.substringAfter  ("/")
    s = substr (s, 0, s.length-4)
+  val d = s.substringAfterLast ("-").trim ()
+   s =    s.substringBeforeLast ("-")
    s = s.replace ("_", " ")
   val f = s.indexOf     ("-")
   val l = s.lastIndexOf ("-")

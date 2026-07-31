@@ -403,7 +403,7 @@ class MusicService: Service ()
          if (localErrorStreak <= 3)  next ()
          true
       }
-   // all our mp3 files are in single level dirs under /Music/tunz
+   // all our mp3 files sit flat in /Music/tunz, rating suffix in filename
       path = Environment.getExternalStorageDirectory ().toString () +
                                                                    "/Music/tunz"
       Dbg.init (File (path).parent !!)
@@ -417,18 +417,11 @@ class MusicService: Service ()
          File ("${File(path).parent}/done.txt").readLines ().toMutableList ()
       }
       catch (e: Exception) { mutableListOf () }
-   // ok, list off each dir in path
-     val mus  = File (path).listFiles () ?: emptyArray ()
-     val dir  = mutableListOf<String> ()
-      for (i in mus.indices) {
-        val dn = mus [i].getName ()
-         if (dn != ".thumbnails" && mus [i].isDirectory)  dir.add (dn)
-      }
-      dir.sort ()
-      dir.forEach { d ->
-        val dl = File ("$path/$d").listFiles ()
-        val ls: Array<String> = dl!!.map { it.getName () }.toTypedArray ()
-         ls.sort ()
+   // ok, list off every mp3 n bucket it by its rating suffix
+     val mus = File (path).listFiles () ?: emptyArray ()
+     val fns = mus.filter { it.isFile && it.getName ().endsWith (".mp3") }
+                                              .map { it.getName () }.sorted ()
+      fns.groupBy { splitfn (it).dir }.toSortedMap ().forEach { (d, ls) ->
          mp3.add (FNList (d, ls.toMutableList ()))
       }
       mediaSession = MediaSessionCompat (this, "TunzSession").apply {
@@ -556,7 +549,7 @@ class MusicService: Service ()
    {  pick.forEach { p ->
          mp3.forEach { m ->
             if (p == m.dir)  m.fn.forEach { fn ->
-               play.add ("$p/$fn")
+               play.add (fn)
             }
          }
       }
@@ -575,7 +568,6 @@ class MusicService: Service ()
       // build a shuffled interleaved list per picked dir, minus done songs
         val buckets = pick.mapNotNull { p ->
                mp3.find { it.dir == p }?.fn
-                  ?.map { "$p/$it" }
                   ?.filter { !done.contains (it) }
                   ?.shuffled ()
                   ?.toMutableList ()
@@ -585,7 +577,6 @@ class MusicService: Service ()
             done.clear ()
             pick.forEach { p ->
                mp3.find { it.dir == p }?.fn
-                  ?.map { "$p/$it" }
                   ?.shuffled ()
                   ?.let { if (it.isNotEmpty ())
                              buckets.add (it.toMutableList ()) }

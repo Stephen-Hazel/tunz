@@ -27,13 +27,15 @@ Tunz is a personal Android music player for two users (Annie and Steve). It read
 
 This is a **single-Activity, single-file app**. Nearly all logic lives in `app/src/main/java/app/shaz/tunz/MainActivity.kt`. There are no fragments, ViewModels, repositories, or services — everything is inline.
 
-**Music directory layout on device** (`/Music/tunz/`):
-- `An/` — Annie's songs
-- `St/` — Steve's songs
-- `_a/` — Shared A-list (replayable)
-- `_b/` — Shared B-list (once only)
+**Music files on device** (`/Music/tunz/`): all mp3s sit flat directly in
+this one directory — no subdirectories. Each file's rating tag is
+suffixed on the filename instead of being a folder name, so re-rating a
+song is just a rename. Known rating values in use: `An` (Annie's
+songs), `St` (Steve's songs), `_a` (shared, replayable), `_b` (shared,
+once only), `sing` (sing-along list) — but this set isn't fixed in
+code; any new suffix works without a code change.
 
-**Filename format** (required): `group - year album song# - title.mp3`
+**Filename format** (required): `group - year album song# - title - rating.mp3`
 
 **Key in-memory state:**
 - `pick` — which dirs are selected (checkboxes)

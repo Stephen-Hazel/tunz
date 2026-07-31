@@ -1,4 +1,2 @@
-don't use dirs under music/tunz
-   just _a.mp3 suffix for dir
-   and build in an ez way to re-dir songs
+done for now :)
 
