@@ -13,6 +13,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
 import android.net.wifi.WifiManager
@@ -24,6 +25,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -57,6 +59,8 @@ const val ACTION_PLAY_PAUSE = "app.shaz.tunz.PLAY_PAUSE"
 const val ACTION_NEXT       = "app.shaz.tunz.NEXT"
 const val CHANNEL_ID        = "tunz_playback"
 const val NOTIF_ID          = 1
+const val BT_WATCHDOG_POLL_MS    = 500L
+const val BT_WATCHDOG_TIMEOUT_MS = 5000L
 
 
 object Dbg
@@ -143,6 +147,7 @@ class MusicService: Service ()
    private var lastCastDeviceId: String? = null
    private var reconnectAttempts = 0
    private val reconnectHandler = Handler (Looper.getMainLooper ())
+   private val btWatchdogHandler = Handler (Looper.getMainLooper ())
 
    private lateinit var mediaSession: MediaSessionCompat
 
@@ -467,6 +472,7 @@ class MusicService: Service ()
          setCallback (object: MediaSessionCompat.Callback ()
          {  override fun onPlay ()
             {  Dbg.log ("TunzSkip", "onPlay")
+               btWatchdogHandler.removeCallbacksAndMessages (null)
                mplay?.start ()
                updateMediaSession ()
                postNotification ()
@@ -474,6 +480,7 @@ class MusicService: Service ()
 
             override fun onPause ()
             {  Dbg.log ("TunzSkip", "onPause")
+               btWatchdogHandler.removeCallbacksAndMessages (null)
                mplay?.pause ()
                updateMediaSession ()
                postNotification ()
@@ -487,7 +494,7 @@ class MusicService: Service ()
          isActive = true
       }
 
-      btDisco = BTDisco (mplay!!) { mediaSession.controller.transportControls.pause () }
+      btDisco = BTDisco (mplay!!) { handleNoisyPause () }
       registerReceiver (btDisco, intentFilter)
 
       try {
@@ -521,6 +528,7 @@ class MusicService: Service ()
    {  super.onDestroy ()
       unregisterReceiver (btDisco)
       reconnectHandler.removeCallbacksAndMessages (null)
+      btWatchdogHandler.removeCallbacksAndMessages (null)
       if (mplay?.isPlaying == true)  mplay?.stop ()
       mplay?.release ()
       mplay = null
@@ -667,6 +675,7 @@ class MusicService: Service ()
    // row set if song table got doubleclicked.  else itsa neeext
    {  Dbg.log ("TunzSkip",
                "next enter row=$row ppos=$ppos playSize=${play.size}")
+      btWatchdogHandler.removeCallbacksAndMessages (null)
       mplay?.stop ()
       mplay?.reset ()
      val removedPos: Int
@@ -731,6 +740,37 @@ class MusicService: Service ()
       }
       bucket.fn.add (newFn)
       return newFn
+   }
+
+
+// pause on a noisy-audio blip (bt route hiccup, headphones out, etc), then
+// watch for the bt route coming right back so we don't just sit silent
+// waiting on an external play/skip command that may take a while (or never
+// arrive) - see docs/do.txt notes on the "Hey Google, next song" gap
+   private fun handleNoisyPause ()
+   {  mediaSession.controller.transportControls.pause ()
+      startBtResumeWatchdog ()
+   }
+
+   private fun isBtA2dpConnected (): Boolean =
+      (getSystemService (Context.AUDIO_SERVICE) as AudioManager)
+         .getDevices (AudioManager.GET_DEVICES_OUTPUTS)
+         .any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP }
+
+   private fun startBtResumeWatchdog ()
+   {  btWatchdogHandler.removeCallbacksAndMessages (null)
+     val deadline = SystemClock.elapsedRealtime () + BT_WATCHDOG_TIMEOUT_MS
+      fun poll ()
+      {  if (isBtA2dpConnected ()) {
+            Dbg.log ("TunzSkip", "bt watchdog: route back, resuming")
+            mediaSession.controller.transportControls.play ()
+         }
+         else if (SystemClock.elapsedRealtime () < deadline)
+            btWatchdogHandler.postDelayed ({ poll () }, BT_WATCHDOG_POLL_MS)
+         else
+            Dbg.log ("TunzSkip", "bt watchdog: gave up, staying paused")
+      }
+      btWatchdogHandler.postDelayed ({ poll () }, BT_WATCHDOG_POLL_MS)
    }
 
 
