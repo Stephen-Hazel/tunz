@@ -198,6 +198,7 @@ class MusicService: Service ()
      val encoded = song.split ("/").joinToString ("/") { Uri.encode (it) }
      val url     = "http://${getLocalIp ()}:8765/$encoded"
       Log.d ("TunzCast", "loading $url")
+      Dbg.log ("TunzCast", "loading $url")
      val fnt     = splitfn (song)
      val meta    = CastMeta (CastMeta.MEDIA_TYPE_MUSIC_TRACK)
       meta.putString (CastMeta.KEY_TITLE,  fnt.ttl)
@@ -218,6 +219,7 @@ class MusicService: Service ()
          { val ms = castSession?.remoteMediaClient?.mediaStatus ?: return
             if (ms.playerState == MediaStatus.PLAYER_STATE_IDLE) {
                Log.d ("TunzCast", "idle reason=${ms.idleReason}")
+               Dbg.log ("TunzCast", "idle reason=${ms.idleReason}")
                if (ms.idleReason == MediaStatus.IDLE_REASON_FINISHED) {
                   castErrorStreak = 0
                   next ()
@@ -228,6 +230,7 @@ class MusicService: Service ()
                else if (ms.idleReason == MediaStatus.IDLE_REASON_ERROR) {
                   castErrorStreak++
                   Log.d ("TunzCast", "error streak=$castErrorStreak")
+                  Dbg.log ("TunzCast", "error streak=$castErrorStreak")
                   if (castErrorStreak <= 3)  next ()
                }
             }
@@ -245,6 +248,7 @@ class MusicService: Service ()
         if (isCasting () && uri == song) {
             castErrorStreak++
             Log.d ("TunzCast", "http stream error streak=$castErrorStreak")
+            Dbg.log ("TunzCast", "http stream error streak=$castErrorStreak")
             if (castErrorStreak <= 3)  next ()
          }
       }
@@ -283,6 +287,7 @@ class MusicService: Service ()
      }
       if (route != null) {
          Log.d ("TunzCast", "reconnecting to $deviceId")
+         Dbg.log ("TunzCast", "reconnecting to $deviceId")
          router.selectRoute (route)
          return
       }
@@ -290,14 +295,20 @@ class MusicService: Service ()
       if (reconnectAttempts <= 5) {
          Log.d ("TunzCast",
                 "device $deviceId not found, retry $reconnectAttempts/5")
+         Dbg.log ("TunzCast",
+                  "device $deviceId not found, retry $reconnectAttempts/5")
          reconnectHandler.postDelayed ({ tryReconnectCast () }, 3000)
       }
-      else  Log.w ("TunzCast", "giving up reconnecting to $deviceId")
+      else {
+         Log.w ("TunzCast", "giving up reconnecting to $deviceId")
+         Dbg.log ("TunzCast", "giving up reconnecting to $deviceId")
+      }
    }
 
    private val castListener = object : SessionManagerListener<CastSession>
    {  override fun onSessionStarted (session: CastSession, id: String)
-      {  castSession = session
+      {  Dbg.log ("TunzCast", "session started device=${session.castDevice?.deviceId}")
+         castSession = session
          castErrorStreak = 0
          reconnectAttempts = 0
          reconnectHandler.removeCallbacksAndMessages (null)
@@ -316,7 +327,10 @@ class MusicService: Service ()
 
       override fun onSessionResumed (session: CastSession,
                                      wasSuspended: Boolean)
-      {  castSession = session
+      {  Dbg.log ("TunzCast",
+                  "session resumed wasSuspended=$wasSuspended " +
+                  "device=${session.castDevice?.deviceId}")
+         castSession = session
          reconnectAttempts = 0
          reconnectHandler.removeCallbacksAndMessages (null)
          lastCastDeviceId = session.castDevice?.deviceId
@@ -333,6 +347,7 @@ class MusicService: Service ()
 
       override fun onSessionEnded (session: CastSession, error: Int)
       {  Log.d ("TunzCast", "session ended error=$error")
+         Dbg.log ("TunzCast", "session ended error=$error")
          unregCastCb ()
          castSession = null
          httpServer?.stop ()
@@ -366,15 +381,21 @@ class MusicService: Service ()
          postNotification ()
       }
 
-      override fun onSessionStarting    (s: CastSession) {}
+      override fun onSessionStarting    (s: CastSession)
+      {  Dbg.log ("TunzCast", "session starting") }
       override fun onSessionStartFailed (s: CastSession, e: Int)
-      {  Log.e ("TunzCast", "session start failed error=$e") }
-      override fun onSessionEnding      (s: CastSession) {}
-      override fun onSessionResuming    (s: CastSession, id: String) {}
+      {  Log.e ("TunzCast", "session start failed error=$e")
+         Dbg.log ("TunzCast", "session start failed error=$e") }
+      override fun onSessionEnding      (s: CastSession)
+      {  Dbg.log ("TunzCast", "session ending") }
+      override fun onSessionResuming    (s: CastSession, id: String)
+      {  Dbg.log ("TunzCast", "session resuming id=$id") }
       override fun onSessionResumeFailed(s: CastSession, e: Int)
-      {  Log.e ("TunzCast", "session resume failed error=$e") }
+      {  Log.e ("TunzCast", "session resume failed error=$e")
+         Dbg.log ("TunzCast", "session resume failed error=$e") }
       override fun onSessionSuspended   (s: CastSession, r: Int)
-      {  Log.d ("TunzCast", "session suspended reason=$r") }
+      {  Log.d ("TunzCast", "session suspended reason=$r")
+         Dbg.log ("TunzCast", "session suspended reason=$r") }
    }
 
    fun togglePlayPause (): Boolean
@@ -428,6 +449,7 @@ class MusicService: Service ()
                                                                    "/Music/tunz"
       Dbg.init (File (path).parent !!)
       Dbg.installCrashLogger ()
+      Dbg.log ("TunzSkip", "onCreate: service created")
    // load shuf,picked dirs from last time
      val p = getSharedPreferences ("prf", MODE_PRIVATE)
       shuf = p.getBoolean   ("shuf", true)
@@ -526,6 +548,7 @@ class MusicService: Service ()
    override fun onDestroy ()
    // shut it all down
    {  super.onDestroy ()
+      Dbg.log ("TunzSkip", "onDestroy: service destroyed")
       unregisterReceiver (btDisco)
       reconnectHandler.removeCallbacksAndMessages (null)
       btWatchdogHandler.removeCallbacksAndMessages (null)
@@ -552,7 +575,8 @@ class MusicService: Service ()
 
 
    override fun onTaskRemoved (rootIntent: Intent?)
-   {  stopForeground (STOP_FOREGROUND_REMOVE)
+   {  Dbg.log ("TunzSkip", "onTaskRemoved: app swiped away, stopping")
+      stopForeground (STOP_FOREGROUND_REMOVE)
       stopSelf ()
    }
 
