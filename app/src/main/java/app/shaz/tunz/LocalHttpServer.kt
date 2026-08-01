@@ -25,6 +25,7 @@ class LocalHttpServer (private val basePath: String) {
          serverSocket = ss
          running = true
          Log.d ("HTTP", "listening on ${ss.localPort}")
+         Dbg.log ("HTTP", "listening on ${ss.localPort}")
          Thread {
             while (running) {
                try {
@@ -32,11 +33,19 @@ class LocalHttpServer (private val basePath: String) {
                   clients.add (client)
                   Thread { handle (client) }.start ()
                }
-               catch (e: Exception) { if (running)  Log.e ("HTTP", "accept", e) }
+               catch (e: Exception) {
+                  if (running) {
+                     Log.e ("HTTP", "accept", e)
+                     Dbg.log ("HTTP", "accept: $e")
+                  }
+               }
             }
          }.start ()
       }
-      catch (e: Exception) { Log.e ("HTTP", "start", e) }
+      catch (e: Exception) {
+         Log.e ("HTTP", "start", e)
+         Dbg.log ("HTTP", "start: $e")
+      }
    }
 
    fun stop ()
@@ -62,10 +71,12 @@ class LocalHttpServer (private val basePath: String) {
         val rawPath = parts.getOrNull (1) ?: return
          uri = URLDecoder.decode (rawPath.trimStart ('/'), "UTF-8")
          Log.d ("HTTP", "request $uri")
+         Dbg.log ("HTTP", "request $uri")
         val file    = File ("$basePath/$uri")
         val out     = sock.getOutputStream ()
          if (! file.exists () || ! file.isFile) {
             Log.w ("HTTP", "404 $uri (looked in ${file.path})")
+            Dbg.log ("HTTP", "404 $uri (looked in ${file.path})")
             out.write ("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"
                           .toByteArray ())
             return
@@ -98,12 +109,28 @@ class LocalHttpServer (private val basePath: String) {
             sent = file.inputStream ().use { stream (it, out, 0L, wanted) }
          }
          out.flush ()
-         if (sent == wanted)  Log.d ("HTTP", "sent $sent/$wanted $uri")
-         else  Log.w ("HTTP", "short write $sent/$wanted $uri")
+         if (sent == wanted) {
+            Log.d ("HTTP", "sent $sent/$wanted $uri")
+            Dbg.log ("HTTP", "sent $sent/$wanted $uri")
+         }
+         else {
+            Log.w ("HTTP", "short write $sent/$wanted $uri")
+            Dbg.log ("HTTP", "short write $sent/$wanted $uri")
+            uri?.let { onStreamError?.invoke (it) }
+         }
       }
       catch (e: Exception) {
+      // this is always the CLIENT (the cast receiver) tearing down the
+      // connection mid-transfer - e.g. it decided to skip while a multi-
+      // MB file was still mid-download (STREAM_TYPE_BUFFERED downloads
+      // each track in full before playing it, so this is routine, not
+      // rare). that's the receiver's own doing, not a playback failure -
+      // MusicService already learns about any resulting track change from
+      // the cast SDK's own onStatusUpdated()/currentItemId, so firing
+      // onStreamError here too just races that and double-advances.
+      // (a truly local failure - short write below - still reports it)
          Log.e ("HTTP", "handle $uri", e)
-         uri?.let { onStreamError?.invoke (it) }
+         Dbg.log ("HTTP", "handle $uri: $e")
       }
       finally {
          clients.remove (sock)

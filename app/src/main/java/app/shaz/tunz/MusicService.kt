@@ -33,7 +33,9 @@ import android.util.Log
 import android.view.KeyEvent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.IntentCompat
 import androidx.media.app.NotificationCompat.MediaStyle
+import androidx.media.VolumeProviderCompat
 import androidx.media.session.MediaButtonReceiver
 import androidx.mediarouter.media.MediaRouter
 import com.google.android.gms.cast.CastDevice
@@ -41,17 +43,20 @@ import com.google.android.gms.cast.CastStatusCodes
 import com.google.android.gms.cast.MediaInfo
 import com.google.android.gms.cast.MediaLoadRequestData
 import com.google.android.gms.cast.MediaMetadata  as CastMeta
+import com.google.android.gms.cast.MediaQueueItem
 import com.google.android.gms.cast.MediaStatus
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.cast.framework.SessionManagerListener
 import com.google.android.gms.cast.framework.media.RemoteMediaClient
+import com.google.android.gms.common.api.PendingResult
 import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 
 // setup play/pause/skip api
@@ -61,6 +66,7 @@ const val CHANNEL_ID        = "tunz_playback"
 const val NOTIF_ID          = 1
 const val BT_WATCHDOG_POLL_MS    = 500L
 const val BT_WATCHDOG_TIMEOUT_MS = 5000L
+const val CAST_QUEUE_LOAD_DEBOUNCE_MS = 400L
 
 
 object Dbg
@@ -107,9 +113,10 @@ object Dbg
 
 
 interface PlaybackCallback {
-   fun onPlaylistReady   (play: List<String>)
-   fun onSongChanged     (removedPos: Int, newPpos: Int)
-   fun onAlbumArtChanged (art: Bitmap?)
+   fun onPlaylistReady    (play: List<String>)
+   fun onSongChanged      (removedPos: Int, newPpos: Int)
+   fun onAlbumArtChanged  (art: Bitmap?)
+   fun onCastVolumeChanged (vol: Double)
 }
 
 
@@ -142,12 +149,18 @@ class MusicService: Service ()
    private var httpServer: LocalHttpServer? = null
    private var wifiLock: WifiManager.WifiLock? = null
    private var castCb: RemoteMediaClient.Callback? = null
+   private var volumeProvider: VolumeProviderCompat? = null
    private var castErrorStreak = 0
    private var localErrorStreak = 0
    private var lastCastDeviceId: String? = null
+   private var lastCastQueueSize = -1
+   private var lastAdvancedItemId = -1
+   private var castSkipInFlight = false
+   private var castQueueLoadPending = false
    private var reconnectAttempts = 0
    private val reconnectHandler = Handler (Looper.getMainLooper ())
    private val btWatchdogHandler = Handler (Looper.getMainLooper ())
+   private val castQueueLoadHandler = Handler (Looper.getMainLooper ())
 
    private lateinit var mediaSession: MediaSessionCompat
 
@@ -170,11 +183,33 @@ class MusicService: Service ()
       catch (e: Exception) { }
    }
 
+   private fun buildVolumeProvider (): VolumeProviderCompat
+   { val cur = (castVolume () * 50).toInt ()
+      return object: VolumeProviderCompat (
+         VOLUME_CONTROL_ABSOLUTE, 50, cur)
+      {  override fun onSetVolumeTo (vol: Int)
+         { val step = vol.coerceIn (0, 50)
+           val v    = step / 50.0
+            setCastVolume (v)
+            currentVolume = step
+            callback?.onCastVolumeChanged (v)
+         }
+         override fun onAdjustVolume (direction: Int)
+         { val step = (currentVolume + direction).coerceIn (0, 50)
+           val v    = step / 50.0
+            setCastVolume (v)
+            currentVolume = step
+            callback?.onCastVolumeChanged (v)
+         }
+      }
+   }
+
    private fun getLocalIp (): String
    {  try {
         val ifaces = NetworkInterface.getNetworkInterfaces ()?.toList ()
          if (ifaces == null) {
             Log.w ("TunzCast", "no network interfaces, using loopback")
+            Dbg.log ("TunzCast", "no network interfaces, using loopback")
             return "127.0.0.1"
          }
       // prefer wlan so we don't hand the chromecast a cellular rmnet addr
@@ -188,18 +223,21 @@ class MusicService: Service ()
                if (! addr.isLoopbackAddress && addr is Inet4Address)
                   return addr.hostAddress ?: continue
       }
-      catch (e: Exception) { Log.w ("TunzCast", "getLocalIp failed", e) }
+      catch (e: Exception) {
+         Log.w ("TunzCast", "getLocalIp failed", e)
+         Dbg.log ("TunzCast", "getLocalIp failed: $e")
+      }
       Log.w ("TunzCast", "no usable ip found, using loopback")
+      Dbg.log ("TunzCast", "no usable ip found, using loopback")
       return "127.0.0.1"
    }
 
-   private fun loadCastSong ()
-   { val cs      = castSession ?: return
-     val encoded = song.split ("/").joinToString ("/") { Uri.encode (it) }
+   private fun buildCastQueueItem (songFile: String): MediaQueueItem
+   { val encoded = songFile.split ("/").joinToString ("/") { Uri.encode (it) }
      val url     = "http://${getLocalIp ()}:8765/$encoded"
-      Log.d ("TunzCast", "loading $url")
-      Dbg.log ("TunzCast", "loading $url")
-     val fnt     = splitfn (song)
+      Log.d ("TunzCast", "queueing $url")
+      Dbg.log ("TunzCast", "queueing $url")
+     val fnt     = splitfn (songFile)
      val meta    = CastMeta (CastMeta.MEDIA_TYPE_MUSIC_TRACK)
       meta.putString (CastMeta.KEY_TITLE,  fnt.ttl)
       meta.putString (CastMeta.KEY_ARTIST, fnt.grp)
@@ -208,8 +246,115 @@ class MusicService: Service ()
                   .setContentType ("audio/mpeg")
                   .setMetadata    (meta)
                   .build ()
-      cs.remoteMediaClient?.load (
-         MediaLoadRequestData.Builder ().setMediaInfo (mi).build ())
+      return MediaQueueItem.Builder (mi).build ()
+   }
+
+   private fun logCastResult (
+      op: String,
+      pending: PendingResult<RemoteMediaClient.MediaChannelResult>?)
+   // every queue* call is fire-and-forget by default - without this, a
+   // failed queueNext()/queueLoad()/etc (dropped session, invalid item id
+   // race, receiver said no) leaves zero trace, same blind spot that made
+   // the original bt-skip bug hard to pin down
+   {  pending?.setResultCallback { r ->
+         if (! r.status.isSuccess)
+            Dbg.log ("TunzCast",
+               "$op failed: ${r.status.statusCode} ${r.status.statusMessage}")
+      }
+   }
+
+   private fun loadCastQueue ()
+   // load current+2-ahead as a real cast queue (not a one-off load()) so
+   // the receiver itself knows what "next" means - lets "Hey Google, skip"
+   // spoken straight at the cast device (never reaches this app at all)
+   // actually have something to skip to. 2 ahead rather than 1 gives a
+   // couple of rapid-fire skips some slack instead of running the queue
+   // dry the instant a queueAppendItem() round-trip lags behind
+   { val cs    = castSession ?: return
+     val items = mutableListOf (buildCastQueueItem (song))
+      play.getOrNull (ppos + 1)?.let { items.add (buildCastQueueItem (it)) }
+      play.getOrNull (ppos + 2)?.let { items.add (buildCastQueueItem (it)) }
+   // rePlay() calls this on every dir-checkbox toggle - rapidly hitting a
+   // few checkboxes fired one queueLoad() per click, which overlap and
+   // race on the receiver (one loses with a 2103 REPLACED, and the
+   // receiver can end up on a stale queue that no longer matches local
+   // play/ppos/song). debounce so only the last click in a burst actually
+   // reaches the receiver
+      castQueueLoadHandler.removeCallbacksAndMessages (null)
+      castQueueLoadHandler.postDelayed ({
+      // the OLD queue can keep emitting status updates for a moment after
+      // we issue queueLoad() - the receiver hasn't actually replaced it
+      // yet. block handleCastQueueAdvance() from looking at ANY status
+      // update until this load is confirmed, so a straggling update from
+      // the queue we're about to replace can't get misread as an advance
+      // (or wrongly absorbed as this load's baseline) and corrupt local
+      // ppos/song against a queue that has nothing to do with it
+         castQueueLoadPending = true
+         Dbg.log ("TunzCast", "loadCastQueue: ${items.size} item(s) song=$song")
+        val pending = cs.remoteMediaClient?.queueLoad (
+            items.toTypedArray (), 0, MediaStatus.REPEAT_MODE_REPEAT_OFF, null)
+         if (pending == null)  castQueueLoadPending = false
+         pending?.setResultCallback ({ r ->
+            castQueueLoadPending = false
+            if (r.status.isSuccess) {
+               lastAdvancedItemId = -1
+               castSkipInFlight = false
+            }
+            else  Dbg.log ("TunzCast", "queueLoad failed: " +
+               "${r.status.statusCode} ${r.status.statusMessage}")
+         }, 10, TimeUnit.SECONDS)
+      }, CAST_QUEUE_LOAD_DEBOUNCE_MS)
+   }
+
+   private fun handleCastQueueAdvance (ms: MediaStatus)
+   // the receiver moved its currentItem on to something other than the
+   // last one we knew about - happens whether we asked it to (queueNext()
+   // below, from a button/phone-heard "skip") or the cast device did it on
+   // its own ("Hey Google, skip" spoken to the speaker itself, or the
+   // current track just finishing). either way this is the one place that
+   // keeps play/ppos/song/done in sync with what's actually on the
+   // receiver, and keeps a "next" item queued for the round after this one.
+   // keyed off itemId rather than queue position: the queue is never
+   // pruned (see queueAppendItem below, no matching remove) so "current"
+   // drifts to a higher index every skip - position was never a reliable
+   // signal and comparing ids side-steps it entirely
+   { if (castQueueLoadPending)  return
+     val client = castSession?.remoteMediaClient ?: return
+     val items  = ms.queueItems ?: return
+      if (items.size != lastCastQueueSize) {
+         Dbg.log ("TunzCast", "cast queue size now ${items.size}")
+         lastCastQueueSize = items.size
+      }
+     val curId = ms.currentItemId
+      if (curId == MediaQueueItem.INVALID_ITEM_ID)  return
+      if (lastAdvancedItemId == -1) {
+      // first status update since a fresh loadCastQueue() - this is just
+      // that queue's starting item, not an advance
+         lastAdvancedItemId = curId
+         return
+      }
+      if (curId == lastAdvancedItemId)  return
+      lastAdvancedItemId = curId
+      castSkipInFlight = false
+      Dbg.log ("TunzCast", "receiver advanced to queue item $curId")
+      advanceLocal ()
+      if (ppos >= play.size)  return
+      song = play [ppos]
+      loadAlbumArt ()
+      updateMediaSession ()
+      postNotification ()
+   // loadCastQueue() preloads current+2-ahead, so after this one-step
+   // advance the receiver already has ppos+1 queued (it was "ahead2"
+   // before this advance) - only ppos+2 is genuinely new. appending
+   // ppos+1 here would re-queue a song already sitting in the queue as a
+   // second, distinct item, which the receiver would eventually play as
+   // an extra, silent-to-the-user advance - exactly the kind of gap that
+   // desyncs the phone's idea of "current song" from what's really on air
+      play.getOrNull (ppos + 2)?.let {
+         logCastResult ("queueAppendItem",
+            client.queueAppendItem (buildCastQueueItem (it), null))
+      }
+      callback?.onSongChanged (ppos, ppos)
    }
 
    private fun regCastCb ()
@@ -217,6 +362,8 @@ class MusicService: Service ()
       castCb = object : RemoteMediaClient.Callback ()
       {  override fun onStatusUpdated ()
          { val ms = castSession?.remoteMediaClient?.mediaStatus ?: return
+            updateMediaSession ()
+            handleCastQueueAdvance (ms)
             if (ms.playerState == MediaStatus.PLAYER_STATE_IDLE) {
                Log.d ("TunzCast", "idle reason=${ms.idleReason}")
                Dbg.log ("TunzCast", "idle reason=${ms.idleReason}")
@@ -232,6 +379,8 @@ class MusicService: Service ()
                   Log.d ("TunzCast", "error streak=$castErrorStreak")
                   Dbg.log ("TunzCast", "error streak=$castErrorStreak")
                   if (castErrorStreak <= 3)  next ()
+                  else  Dbg.log ("TunzCast",
+                     "giving up after $castErrorStreak consecutive errors")
                }
             }
          }
@@ -245,11 +394,18 @@ class MusicService: Service ()
    // server's handler thread, so hop back to main before touching
    // any playback state
    {  reconnectHandler.post {
+        if (castSkipInFlight) {
+            Dbg.log ("TunzCast",
+               "ignoring stream reset for $uri - skip in flight")
+            return@post
+         }
         if (isCasting () && uri == song) {
             castErrorStreak++
             Log.d ("TunzCast", "http stream error streak=$castErrorStreak")
             Dbg.log ("TunzCast", "http stream error streak=$castErrorStreak")
             if (castErrorStreak <= 3)  next ()
+            else  Dbg.log ("TunzCast",
+               "giving up after $castErrorStreak consecutive errors")
          }
       }
    }
@@ -259,10 +415,14 @@ class MusicService: Service ()
       castCb = null
    }
 
+   @Suppress("DEPRECATION")
    private fun acquireWifiLock ()
    // wifi radio power-saves when the screen is off, which can stall
    // our http server for tens of seconds between beacon wakeups -
-   // keep it awake for as long as we're serving to the cast device
+   // keep it awake for as long as we're serving to the cast device.
+   // WIFI_MODE_FULL_HIGH_PERF is deprecated (the OS manages this
+   // automatically since API 34) but minSdk is 24 and there's no
+   // non-deprecated equivalent, so we still need it on older devices
    {  if (wifiLock?.isHeld == true)  return
      val wm = applicationContext
                  .getSystemService (Context.WIFI_SERVICE) as WifiManager
@@ -319,8 +479,10 @@ class MusicService: Service ()
          }
          acquireWifiLock ()
          mplay?.pause ()
-         if (song.isNotEmpty ())  loadCastSong ()
+         if (song.isNotEmpty ())  loadCastQueue ()
          regCastCb ()
+         volumeProvider = buildVolumeProvider ()
+         mediaSession.setPlaybackToRemote (volumeProvider!!)
          updateMediaSession ()
          postNotification ()
       }
@@ -340,8 +502,10 @@ class MusicService: Service ()
                it.onStreamError = { uri -> handleHttpStreamError (uri) }
             }
          acquireWifiLock ()
-         if (song.isNotEmpty ())  loadCastSong ()
+         if (song.isNotEmpty ())  loadCastQueue ()
          regCastCb ()
+         volumeProvider = buildVolumeProvider ()
+         mediaSession.setPlaybackToRemote (volumeProvider!!)
          mplay?.pause ()
       }
 
@@ -350,6 +514,8 @@ class MusicService: Service ()
          Dbg.log ("TunzCast", "session ended error=$error")
          unregCastCb ()
          castSession = null
+         volumeProvider = null
+         mediaSession.setPlaybackToLocal (AudioManager.STREAM_MUSIC)
          httpServer?.stop ()
          httpServer = null
          releaseWifiLock ()
@@ -524,6 +690,10 @@ class MusicService: Service ()
          cc.sessionManager.addSessionManagerListener (
             castListener, CastSession::class.java)
          castSession = cc.sessionManager.currentCastSession
+         if (isCasting ()) {
+            volumeProvider = buildVolumeProvider ()
+            mediaSession.setPlaybackToRemote (volumeProvider!!)
+         }
       }
       catch (e: Exception) { }
    }
@@ -533,7 +703,8 @@ class MusicService: Service ()
    override fun onBind (intent: Intent): IBinder = binder
 
    override fun onStartCommand (intent: Intent?, flags: Int, startId: Int): Int
-   {  val key = intent?.getParcelableExtra (Intent.EXTRA_KEY_EVENT) as? KeyEvent
+   {  val key = intent?.let { IntentCompat.getParcelableExtra (
+                  it, Intent.EXTRA_KEY_EVENT, KeyEvent::class.java) }
       Dbg.log ("TunzSkip",
                "onStartCommand action=${intent?.action} key=${key?.keyCode}")
       MediaButtonReceiver.handleIntent (mediaSession, intent)
@@ -552,6 +723,15 @@ class MusicService: Service ()
       unregisterReceiver (btDisco)
       reconnectHandler.removeCallbacksAndMessages (null)
       btWatchdogHandler.removeCallbacksAndMessages (null)
+      castQueueLoadHandler.removeCallbacksAndMessages (null)
+   // clear cast state before tearing anything else down - httpServer
+   // .stop() below deliberately kills in-flight sockets, which fires
+   // handleHttpStreamError()/onStatusUpdated() asynchronously; without
+   // this, isCasting() still reads true and those callbacks keep
+   // calling next() against a service that's already destroyed
+      unregCastCb ()
+      castSession = null
+      volumeProvider = null
       if (mplay?.isPlaying == true)  mplay?.stop ()
       mplay?.release ()
       mplay = null
@@ -674,7 +854,7 @@ class MusicService: Service ()
       ppos = 0
       song = play [ppos]
       loadAlbumArt ()
-      if (isCasting ())  loadCastSong ()
+      if (isCasting ())  loadCastQueue ()
       else {
          try {
             mplay?.setDataSource ("$path/$song")
@@ -695,19 +875,57 @@ class MusicService: Service ()
    }
 
 
+   private fun advanceLocal (): Int
+   // shared bookkeeping for a sequential (row==-1) advance: mark the
+   // current song done and drop it from play. doesn't touch mplay/cast -
+   // callers decide what (if anything) to load next
+   { val removedPos = ppos
+      done.add (song)
+      play.removeAt (ppos)
+      return removedPos
+   }
+
+
    fun next (row: Int = -1)
    // row set if song table got doubleclicked.  else itsa neeext
    {  Dbg.log ("TunzSkip",
                "next enter row=$row ppos=$ppos playSize=${play.size}")
+   // a NEXT action (skip button, media key) can reach a just-created
+   // service before the playlist is rebuilt - nothing to skip to yet
+      if (row == -1 && ppos !in play.indices) {
+         Dbg.log ("TunzSkip",
+                  "next: ppos=$ppos out of range for playSize=" +
+                  "${play.size}, ignoring")
+         return
+      }
       btWatchdogHandler.removeCallbacksAndMessages (null)
+   // while casting, a sequential skip just tells the receiver to move to
+   // whatever it already has queued as "next" (see loadCastQueue()) -
+   // handleCastQueueAdvance() picks up the resulting currentItemId change
+   // and does the play/ppos/song/done bookkeeping there, so this same path
+   // and a "Hey Google, skip" heard by the cast device itself (which never
+   // reaches this app directly) end up updating state in exactly one place
+      if (row == -1 && isCasting ()) {
+         Dbg.log ("TunzCast", "next: casting, sending queueNext")
+      // the receiver drops its in-flight HTTP connection to the current
+      // song the instant it acts on this - that's an expected side effect
+      // of skipping, not a playback failure, so tell handleHttpStreamError
+      // to ignore it til handleCastQueueAdvance() confirms the skip landed
+         castSkipInFlight = true
+         castSession?.remoteMediaClient?.queueNext (null)?.setResultCallback {
+            r ->
+            if (! r.status.isSuccess) {
+               Dbg.log ("TunzCast", "queueNext failed: " +
+                  "${r.status.statusCode} ${r.status.statusMessage}")
+               castSkipInFlight = false
+            }
+         }
+         return
+      }
       mplay?.stop ()
       mplay?.reset ()
      val removedPos: Int
-      if (row == -1) {
-         done.add (song)
-         removedPos = ppos
-         play.removeAt (ppos)
-      }
+      if (row == -1)  removedPos = advanceLocal ()
       else {
          removedPos = -1
          ppos = row
@@ -715,7 +933,7 @@ class MusicService: Service ()
       if (ppos < play.size) {
          song = play [ppos]
          loadAlbumArt ()
-         if (isCasting ())  loadCastSong ()
+         if (isCasting ())  loadCastQueue ()
          else {
             try {
                mplay?.setDataSource ("$path/$song")
@@ -815,9 +1033,15 @@ class MusicService: Service ()
 
    private fun updateMediaSession ()
    {  if (song.isEmpty ())  return
-     val state = if (mplay?.isPlaying == true)
-                       PlaybackStateCompat.STATE_PLAYING
-                 else  PlaybackStateCompat.STATE_PAUSED
+   // while casting, mplay is intentionally paused - report the remote
+   // player's actual state instead, or the session always looks
+   // "paused" and the OS won't route volume keys to it
+     val playing = if (isCasting ())
+                      castSession?.remoteMediaClient?.mediaStatus
+                         ?.playerState == MediaStatus.PLAYER_STATE_PLAYING
+                   else  mplay?.isPlaying == true
+     val state = if (playing)  PlaybackStateCompat.STATE_PLAYING
+                 else           PlaybackStateCompat.STATE_PAUSED
       mediaSession.setPlaybackState (
          PlaybackStateCompat.Builder ()
             .setState (state, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1f)
