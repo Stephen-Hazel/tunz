@@ -158,6 +158,7 @@ class MusicService: Service ()
    private var castSkipInFlight = false
    private var castQueueLoadPending = false
    private var reconnectAttempts = 0
+   private var noisyPauseGuard = false
    private val reconnectHandler = Handler (Looper.getMainLooper ())
    private val btWatchdogHandler = Handler (Looper.getMainLooper ())
    private val castQueueLoadHandler = Handler (Looper.getMainLooper ())
@@ -668,7 +669,17 @@ class MusicService: Service ()
 
             override fun onPause ()
             {  Dbg.log ("TunzSkip", "onPause")
-               btWatchdogHandler.removeCallbacksAndMessages (null)
+               if (noisyPauseGuard) {
+                  noisyPauseGuard = false
+                  Dbg.log ("TunzSkip",
+                           "onPause: noisy-pause guard held, " +
+                           "watchdog kept armed")
+               }
+               else {
+                  btWatchdogHandler.removeCallbacksAndMessages (null)
+                  Dbg.log ("TunzSkip",
+                           "onPause: watchdog cancelled (manual pause)")
+               }
                mplay?.pause ()
                updateMediaSession ()
                postNotification ()
@@ -1004,8 +1015,17 @@ class MusicService: Service ()
 // watch for the bt route coming right back so we don't just sit silent
 // waiting on an external play/skip command that may take a while (or never
 // arrive) - see docs/do.txt notes on the "Hey Google, next song" gap
+// NOTE: transportControls.pause() dispatches to onPause() above, which
+// (for a manual pause) cancels any watchdog left running from an
+// earlier noisy event. Without noisyPauseGuard, that same cancel would
+// immediately kill the watchdog we're about to arm right here - onPause()
+// fires (sync or posted, doesn't matter) before the first poll ever gets
+// a chance to run, so it looked like the watchdog never existed. The
+// guard tells onPause() "this pause is mine, don't cancel."
    private fun handleNoisyPause ()
-   {  mediaSession.controller.transportControls.pause ()
+   {  noisyPauseGuard = true
+      Dbg.log ("TunzSkip", "handleNoisyPause: pausing, arming watchdog guard")
+      mediaSession.controller.transportControls.pause ()
       startBtResumeWatchdog ()
    }
 
@@ -1014,18 +1034,35 @@ class MusicService: Service ()
          .getDevices (AudioManager.GET_DEVICES_OUTPUTS)
          .any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP }
 
+   private fun outputDevicesDump (): String =
+      (getSystemService (Context.AUDIO_SERVICE) as AudioManager)
+         .getDevices (AudioManager.GET_DEVICES_OUTPUTS)
+         .joinToString { "${it.type}:${it.productName}" }
+
    private fun startBtResumeWatchdog ()
    {  btWatchdogHandler.removeCallbacksAndMessages (null)
      val deadline = SystemClock.elapsedRealtime () + BT_WATCHDOG_TIMEOUT_MS
+      Dbg.log ("TunzSkip",
+               "bt watchdog: armed, timeout=${BT_WATCHDOG_TIMEOUT_MS}ms " +
+               "poll=${BT_WATCHDOG_POLL_MS}ms")
       fun poll ()
-      {  if (isBtA2dpConnected ()) {
-            Dbg.log ("TunzSkip", "bt watchdog: route back, resuming")
+      {  val remaining = deadline - SystemClock.elapsedRealtime ()
+         if (isBtA2dpConnected ()) {
+            Dbg.log ("TunzSkip",
+                     "bt watchdog: route back, resuming " +
+                     "(remaining=${remaining}ms)")
             mediaSession.controller.transportControls.play ()
          }
-         else if (SystemClock.elapsedRealtime () < deadline)
+         else if (remaining > 0) {
+            Dbg.log ("TunzSkip",
+                     "bt watchdog: poll, still no route, " +
+                     "remaining=${remaining}ms")
             btWatchdogHandler.postDelayed ({ poll () }, BT_WATCHDOG_POLL_MS)
+         }
          else
-            Dbg.log ("TunzSkip", "bt watchdog: gave up, staying paused")
+            Dbg.log ("TunzSkip",
+                     "bt watchdog: gave up, staying paused, " +
+                     "outputs=[${outputDevicesDump ()}]")
       }
       btWatchdogHandler.postDelayed ({ poll () }, BT_WATCHDOG_POLL_MS)
    }
