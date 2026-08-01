@@ -743,6 +743,21 @@ class MusicService: Service ()
    }
 
 
+   fun deleteSong (): Boolean
+   // permanently remove the current mp3 - unlike rateSong () this does
+   // NOT keep it playing, moves on immediately like next ()
+   {  if (song.isEmpty ())  return false
+     val oldFn = song
+      try { File (path, oldFn).delete () }
+      catch (e: Exception) { }
+     val d = splitfn (oldFn).dir
+      mp3.find { it.dir == d }?.fn?.remove (oldFn)
+      Dbg.log ("TunzRate", "deleted $oldFn")
+      next ()
+      return true
+   }
+
+
 // pause on a noisy-audio blip (bt route hiccup, headphones out, etc), then
 // watch for the bt route coming right back so we don't just sit silent
 // waiting on an external play/skip command that may take a while (or never

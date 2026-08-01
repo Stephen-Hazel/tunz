@@ -35,13 +35,19 @@
                 android:id="@+id/cb_shuf"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="shuffle" />
+                android:text="shuf" />
 
             <Button
                 android:id="@+id/btn_lyr"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="lyr" />
+
+            <Button
+                android:id="@+id/btn_rate"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="rate" />
 
             <androidx.mediarouter.app.MediaRouteButton
                 android:id="@+id/btn_cast"
@@ -54,36 +60,6 @@
                 android:layout_height="wrap_content"
                 android:layout_gravity="center_vertical"
                 android:paddingStart="8dp" />
-
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/sv_rate"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="#CC000000"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <LinearLayout
-                android:id="@+id/lo_rate1"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="start"
-                android:orientation="horizontal"
-                android:paddingStart="12dp"
-                android:paddingTop="8dp"
-                android:paddingEnd="12dp" />
-
-            <LinearLayout
-                android:id="@+id/lo_rate2"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="start"
-                android:orientation="horizontal"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:paddingBottom="8dp" />
 
         </LinearLayout>
 

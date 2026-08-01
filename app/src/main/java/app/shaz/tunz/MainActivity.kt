@@ -26,6 +26,7 @@ import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.TableRow
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -33,6 +34,7 @@ import com.google.android.gms.cast.framework.CastButtonFactory
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.material.snackbar.Snackbar
 import app.shaz.tunz.databinding.ActivityMainBinding
+import app.shaz.tunz.databinding.DialogRateBinding
 
 
 data class FNList (
@@ -120,6 +122,7 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
    private var svc: MusicService? = null
    private var selRow: TableRow? = null
    private var sentToPerms = false
+   private var rateDialog: AlertDialog? = null
 
    private val conn = object: ServiceConnection
    {  override fun onServiceConnected (name: ComponentName, binder: IBinder)
@@ -161,7 +164,6 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
             }
             b.loTbl.addView (tr)
          }
-         updateRatingRow ()
       }
    }
 
@@ -193,7 +195,7 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
          tr.setBackgroundColor (0xFF3848AF.toInt ())
          tr.requestFocus ()
          selRow = tr as? TableRow
-         updateRatingRow ()
+         rateDialog?.dismiss ()
       }
    }
 
@@ -209,6 +211,7 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
       fillCheckRow (b.loLin1, dirs1)
       fillCheckRow (b.loLin2, dirs2)
       b.btnLyr.setOnClickListener { s.lyricsSearch () }
+      b.btnRate.setOnClickListener { showRateDialog () }
       try {
          CastButtonFactory.setUpMediaRouteButton (this, b.btnCast)
       }
@@ -267,7 +270,7 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
                  val tr  = b.loTbl.getChildAt (s.ppos) as? TableRow
                  val tv2 = tr?.getChildAt (0) as? TextView
                   tv2?.text = fmtfn (newFn)
-                  updateRatingRow ()
+                  rateDialog?.dismiss ()
                }
             }
          }
@@ -276,19 +279,23 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
    }
 
 
-   private fun updateRatingRow ()
-   // "set rating" buttons, two rows, shown after shuf/lyr til the next
-   // song.  the song's current rating is greyed out n disabled
+   private fun showRateDialog ()
+   // "rate" button pops the set-rating buttons plus a delete button
    {  val s = svc ?: return
-      if (s.song.isEmpty ()) {
-         b.svRate.visibility = View.GONE
-         return
-      }
-     val cur = splitfn (s.song).dir
+      if (s.song.isEmpty ())  return
+     val dlgB = DialogRateBinding.inflate (layoutInflater)
+     val cur  = splitfn (s.song).dir
      val (row1, row2) = aSplit (RATINGS)
-      fillRatingRow (b.loRate1, row1, cur)
-      fillRatingRow (b.loRate2, row2, cur)
-      b.svRate.visibility = View.VISIBLE
+      fillRatingRow (dlgB.loRate1, row1, cur)
+      fillRatingRow (dlgB.loRate2, row2, cur)
+      dlgB.btnDelete.setOnClickListener {
+         rateDialog?.dismiss ()
+         s.deleteSong ()
+      }
+      rateDialog = AlertDialog.Builder (this)
+         .setView (dlgB.root)
+         .setOnDismissListener { rateDialog = null }
+         .show ()
    }
 
 
