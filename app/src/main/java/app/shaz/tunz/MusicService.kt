@@ -13,6 +13,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
@@ -169,6 +170,25 @@ class MusicService: Service ()
    private lateinit var btDisco: BTDisco
    private val intentFilter = IntentFilter (
       AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+
+// observability only - neither of these reacts to anything, they just log
+// so we can see what's happening when "Hey Google, skip" (heard by the
+// phone itself, not a cast device) goes weird
+   private var audioFocusListener: AudioManager.OnAudioFocusChangeListener?
+      = null
+   private val audioDeviceCallback = object: AudioDeviceCallback ()
+   {  override fun onAudioDevicesAdded (devices: Array<out AudioDeviceInfo>)
+      {  devices.filter { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP }
+            .forEach { Dbg.log ("TunzBT", "device added: ${it.productName}") }
+      }
+      override fun onAudioDevicesRemoved (
+         devices: Array<out AudioDeviceInfo>)
+      {  devices.filter { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP }
+            .forEach {
+               Dbg.log ("TunzBT", "device removed: ${it.productName}")
+            }
+      }
+   }
 
    fun setCallback (cb: PlaybackCallback?) { callback = cb }
    fun addPick    (dir: String) { if (! pick.contains (dir))  pick.add (dir) }
@@ -689,12 +709,43 @@ class MusicService: Service ()
             {  Dbg.log ("TunzSkip", "onSkipToNext")
                next ()
             }
+
+         // not implemented - logged so an assistant call landing here
+         // instead of onSkipToNext shows up rather than vanishing
+            override fun onStop ()
+            {  Dbg.log ("TunzSkip", "onStop") }
+
+            override fun onSkipToPrevious ()
+            {  Dbg.log ("TunzSkip", "onSkipToPrevious") }
          })
          isActive = true
       }
 
       btDisco = BTDisco (mplay!!) { handleNoisyPause () }
       registerReceiver (btDisco, intentFilter)
+
+    val am = getSystemService (Context.AUDIO_SERVICE) as AudioManager
+      am.registerAudioDeviceCallback (audioDeviceCallback, null)
+      audioFocusListener = AudioManager.OnAudioFocusChangeListener {
+         focusChange ->
+        val name = when (focusChange) {
+            AudioManager.AUDIOFOCUS_GAIN                     -> "GAIN"
+            AudioManager.AUDIOFOCUS_LOSS                     -> "LOSS"
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT            ->
+               "LOSS_TRANSIENT"
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK   ->
+               "LOSS_TRANSIENT_CAN_DUCK"
+            else                                              ->
+               "UNKNOWN($focusChange)"
+         }
+         Dbg.log ("TunzFocus",
+                  "onAudioFocusChange: $name isPlaying=${mplay?.isPlaying} " +
+                  "btA2dp=${isBtA2dpConnected ()}")
+      }
+    @Suppress ("DEPRECATION")
+    val focusRes = am.requestAudioFocus (audioFocusListener,
+         AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+      Dbg.log ("TunzFocus", "requestAudioFocus result=$focusRes")
 
       try {
         val cc = CastContext.getSharedInstance (this)
@@ -732,6 +783,12 @@ class MusicService: Service ()
    {  super.onDestroy ()
       Dbg.log ("TunzSkip", "onDestroy: service destroyed")
       unregisterReceiver (btDisco)
+    val am = getSystemService (Context.AUDIO_SERVICE) as AudioManager
+      am.unregisterAudioDeviceCallback (audioDeviceCallback)
+      audioFocusListener?.let {
+         @Suppress ("DEPRECATION")
+         am.abandonAudioFocus (it)
+      }
       reconnectHandler.removeCallbacksAndMessages (null)
       btWatchdogHandler.removeCallbacksAndMessages (null)
       castQueueLoadHandler.removeCallbacksAndMessages (null)
