@@ -796,7 +796,8 @@ class MusicService: Service ()
          Dbg.log ("TunzFocus",
                   "onAudioFocusChange: $name isPlaying=${mplay?.isPlaying} " +
                   "btA2dp=${isBtA2dpConnected ()} mode=${am.mode} " +
-                  "pos=${mplay?.currentPosition} routed=${routedDeviceStr ()}")
+                  "pos=${mplay?.currentPosition} routed=${routedDeviceStr ()} " +
+                  "vol=${volumeStr ()}")
       // "Hey Google, skip" can call next()'s mplay.start() while
       // Assistant still holds focus for its own SCO listen/response - if
       // the BT stack doesn't cleanly hand A2DP back afterwards, mplay
@@ -814,13 +815,13 @@ class MusicService: Service ()
             mplay?.start ()
             Dbg.log ("TunzFocus",
                      "GAIN: restart kick, pos=$posBefore " +
-                     "routed=${routedDeviceStr ()}")
+                     "routed=${routedDeviceStr ()} vol=${volumeStr ()}")
             focusGainCheckHandler.postDelayed ({
                Dbg.log ("TunzFocus",
                         "GAIN: pos check +1500ms pos=" +
                         "${mplay?.currentPosition} " +
                         "isPlaying=${mplay?.isPlaying} " +
-                        "routed=${routedDeviceStr ()}")
+                        "routed=${routedDeviceStr ()} vol=${volumeStr ()}")
             }, 1500L)
          }
       }
@@ -1185,6 +1186,17 @@ class MusicService: Service ()
 // we're really attached to right now
    private fun routedDeviceStr (): String =
       mplay?.routedDevice?.let { "${it.type}:${it.productName}" } ?: "none"
+
+// STREAM_MUSIC volume as Android sees it - doesn't catch a BT device's
+// own AVRCP-absolute-volume state going to 0 on its end, but rules out
+// (or confirms) the phone-side half of that
+   private fun volumeStr (): String
+   {  val am = getSystemService (Context.AUDIO_SERVICE) as AudioManager
+     val vol = am.getStreamVolume (AudioManager.STREAM_MUSIC)
+     val max = am.getStreamMaxVolume (AudioManager.STREAM_MUSIC)
+     val mut = am.isStreamMute (AudioManager.STREAM_MUSIC)
+      return "$vol/$max muted=$mut"
+   }
 
 // getDevices() lags the real disconnect: on every real car-BT-off event
 // seen in tunz_debug.log, the noisy broadcast fired, getDevices() still
