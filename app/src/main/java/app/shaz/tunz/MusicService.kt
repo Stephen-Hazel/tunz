@@ -762,7 +762,7 @@ class MusicService: Service ()
          isActive = true
       }
 
-      btDisco = BTDisco (mplay!!) { handleNoisyPause () }
+      btDisco = BTDisco ({ mplay }) { handleNoisyPause () }
       registerReceiver (btDisco, intentFilter)
 
     val am = getSystemService (Context.AUDIO_SERVICE) as AudioManager
@@ -1333,14 +1333,18 @@ class MusicService: Service ()
 }
 
 
-class BTDisco (private val mp: MediaPlayer,
+class BTDisco (private val mp: () -> MediaPlayer?,
                private val onNoisy: () -> Unit): BroadcastReceiver ()
 // if bluetooth disconnects, don't keep playin !!
+// mp is a supplier, not a fixed instance - mplay gets torn down and
+// rebuilt on a GAIN full-recreate (see onAudioFocusChange), and a
+// fixed reference here would go stale and throw on the released
+// player the next time a noisy broadcast fires
 {  override fun onReceive (context: Context, intent: Intent)
    {  if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
-         Dbg.log ("TunzSkip",
-                  "audio becoming noisy, isPlaying=${mp.isPlaying}")
-         if (mp.isPlaying)  onNoisy ()
+        val playing = mp ()?.isPlaying == true
+         Dbg.log ("TunzSkip", "audio becoming noisy, isPlaying=$playing")
+         if (playing)  onNoisy ()
       }
    }
 }
