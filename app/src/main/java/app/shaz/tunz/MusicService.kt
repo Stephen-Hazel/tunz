@@ -167,6 +167,7 @@ class MusicService: Service ()
    private val reconnectHandler = Handler (Looper.getMainLooper ())
    private val btWatchdogHandler = Handler (Looper.getMainLooper ())
    private val castQueueLoadHandler = Handler (Looper.getMainLooper ())
+   private val focusGainCheckHandler = Handler (Looper.getMainLooper ())
 
    private lateinit var mediaSession: MediaSessionCompat
 
@@ -175,9 +176,10 @@ class MusicService: Service ()
    private val intentFilter = IntentFilter (
       AudioManager.ACTION_AUDIO_BECOMING_NOISY)
 
-// audioFocusListener is observability only - it just logs so we can see
-// what's happening when "Hey Google, skip" (heard by the phone itself,
-// not a cast device) goes weird. audioDeviceCallback also logs, but its
+// audioFocusListener logs so we can see what's happening when "Hey
+// Google, skip" (heard by the phone itself, not a cast device) goes
+// weird, and on GAIN gives mplay a restart kick - see the comment at
+// its GAIN branch for why. audioDeviceCallback also logs, but its
 // onAudioDevicesAdded additionally arms btReconnectedSinceNoisy - see the
 // NOTE above startBtResumeWatchdog() for why a real re-add event (not a
 // getDevices() snapshot) is what the watchdog needs to trust
@@ -787,7 +789,27 @@ class MusicService: Service ()
          }
          Dbg.log ("TunzFocus",
                   "onAudioFocusChange: $name isPlaying=${mplay?.isPlaying} " +
-                  "btA2dp=${isBtA2dpConnected ()}")
+                  "btA2dp=${isBtA2dpConnected ()} mode=${am.mode} " +
+                  "pos=${mplay?.currentPosition}")
+      // "Hey Google, skip" can call next()'s mplay.start() while
+      // Assistant still holds focus for its own SCO listen/response - if
+      // the BT stack doesn't cleanly hand A2DP back afterwards, mplay
+      // keeps reporting isPlaying=true but produces no audio, and
+      // nothing else ever kicks it again. start() on an already-started
+      // player is a harmless no-op, so doing it unconditionally on GAIN
+      // forces the AudioTrack to reassert itself if it silently died
+         if (focusChange == AudioManager.AUDIOFOCUS_GAIN &&
+             mplay?.isPlaying == true) {
+           val posBefore = mplay?.currentPosition ?: -1
+            mplay?.start ()
+            Dbg.log ("TunzFocus", "GAIN: restart kick, pos=$posBefore")
+            focusGainCheckHandler.postDelayed ({
+               Dbg.log ("TunzFocus",
+                        "GAIN: pos check +1500ms pos=" +
+                        "${mplay?.currentPosition} " +
+                        "isPlaying=${mplay?.isPlaying}")
+            }, 1500L)
+         }
       }
     @Suppress ("DEPRECATION")
     val focusRes = am.requestAudioFocus (audioFocusListener,
