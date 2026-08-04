@@ -795,12 +795,16 @@ class MusicService: Service ()
       // Assistant still holds focus for its own SCO listen/response - if
       // the BT stack doesn't cleanly hand A2DP back afterwards, mplay
       // keeps reporting isPlaying=true but produces no audio, and
-      // nothing else ever kicks it again. start() on an already-started
-      // player is a harmless no-op, so doing it unconditionally on GAIN
-      // forces the AudioTrack to reassert itself if it silently died
+      // nothing else ever kicks it again. a plain start() here is a
+      // no-op on an already-Started player - it doesn't touch the
+      // underlying AudioTrack, so it can't rebind a dead route. cycle
+      // pause/seekTo/start instead to force a real flush and re-attach
+      // to whatever output route is actually live now
          if (focusChange == AudioManager.AUDIOFOCUS_GAIN &&
              mplay?.isPlaying == true) {
            val posBefore = mplay?.currentPosition ?: -1
+            mplay?.pause ()
+            mplay?.seekTo (posBefore)
             mplay?.start ()
             Dbg.log ("TunzFocus", "GAIN: restart kick, pos=$posBefore")
             focusGainCheckHandler.postDelayed ({
