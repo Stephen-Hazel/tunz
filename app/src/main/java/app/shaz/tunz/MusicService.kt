@@ -634,21 +634,7 @@ class MusicService: Service ()
             .setContentTitle ("Tunz")
             .build ())
 
-      mplay = MediaPlayer ()
-      mplay!!.setOnErrorListener { _, what, extra ->
-         Log.e ("TunzLocal", "player error what=$what extra=$extra")
-         Dbg.log ("TunzLocal",
-                  "player error what=$what extra=$extra song=$song")
-         localErrorStreak++
-         if (localErrorStreak <= 3)  next ()
-         true
-      }
-   // event-driven, independent of the GAIN-triggered pos checks above -
-   // fires the instant mplay's actual bound output device changes,
-   // whether or not that lines up with any focus-change we saw
-      mplay!!.addOnRoutingChangedListener ({
-         Dbg.log ("TunzFocus", "routing changed: routed=${routedDeviceStr ()}")
-      }, Handler (Looper.getMainLooper ()))
+      mplay = newMediaPlayer ()
    // all our mp3 files sit flat in /Music/tunz, rating suffix in filename
       path = Environment.getExternalStorageDirectory ().toString () +
                                                                    "/Music/tunz"
@@ -802,20 +788,31 @@ class MusicService: Service ()
       // Assistant still holds focus for its own SCO listen/response - if
       // the BT stack doesn't cleanly hand A2DP back afterwards, mplay
       // keeps reporting isPlaying=true but produces no audio, and
-      // nothing else ever kicks it again. a plain start() here is a
-      // no-op on an already-Started player - it doesn't touch the
-      // underlying AudioTrack, so it can't rebind a dead route. cycle
-      // pause/seekTo/start instead to force a real flush and re-attach
-      // to whatever output route is actually live now
+      // nothing else ever kicks it again. tried a plain start() (no-op
+      // on an already-Started player) and a pause/seekTo/start cycle -
+      // neither fixed it despite routed/vol logging showing everything
+      // normal, so this fully tears down and recreates mplay (a brand
+      // new AudioTrack) instead of trying to revive the old one
          if (focusChange == AudioManager.AUDIOFOCUS_GAIN &&
              mplay?.isPlaying == true) {
            val posBefore = mplay?.currentPosition ?: -1
-            mplay?.pause ()
-            mplay?.seekTo (posBefore)
-            mplay?.start ()
             Dbg.log ("TunzFocus",
-                     "GAIN: restart kick, pos=$posBefore " +
+                     "GAIN: full recreate, pos=$posBefore " +
                      "routed=${routedDeviceStr ()} vol=${volumeStr ()}")
+            try {
+               mplay?.release ()
+               mplay = newMediaPlayer ()
+               mplay?.setDataSource ("$path/$song")
+               mplay?.prepare ()
+               mplay?.seekTo (posBefore)
+               mplay?.start ()
+               mplay?.setOnCompletionListener {
+                  localErrorStreak = 0; next ()
+               }
+            }
+            catch (e: Exception) {
+               Dbg.log ("TunzLocal", "GAIN recreate failed: $e")
+            }
             focusGainCheckHandler.postDelayed ({
                Dbg.log ("TunzFocus",
                         "GAIN: pos check +1500ms pos=" +
@@ -1168,6 +1165,27 @@ class MusicService: Service ()
       Dbg.log ("TunzSkip", "handleNoisyPause: pausing, arming watchdog guard")
       mediaSession.controller.transportControls.pause ()
       startBtResumeWatchdog ()
+   }
+
+// shared setup for both onCreate's original mplay and the GAIN-time
+// full recreate below - the two need identical listeners attached
+   private fun newMediaPlayer (): MediaPlayer
+   {  val mp = MediaPlayer ()
+      mp.setOnErrorListener { _, what, extra ->
+         Log.e ("TunzLocal", "player error what=$what extra=$extra")
+         Dbg.log ("TunzLocal",
+                  "player error what=$what extra=$extra song=$song")
+         localErrorStreak++
+         if (localErrorStreak <= 3)  next ()
+         true
+      }
+   // event-driven, independent of the GAIN-triggered pos checks below -
+   // fires the instant mplay's actual bound output device changes,
+   // whether or not that lines up with any focus-change we saw
+      mp.addOnRoutingChangedListener ({
+         Dbg.log ("TunzFocus", "routing changed: routed=${routedDeviceStr ()}")
+      }, Handler (Looper.getMainLooper ()))
+      return mp
    }
 
    private fun isBtA2dpConnected (): Boolean =
