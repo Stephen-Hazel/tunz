@@ -643,6 +643,12 @@ class MusicService: Service ()
          if (localErrorStreak <= 3)  next ()
          true
       }
+   // event-driven, independent of the GAIN-triggered pos checks above -
+   // fires the instant mplay's actual bound output device changes,
+   // whether or not that lines up with any focus-change we saw
+      mplay!!.addOnRoutingChangedListener ({
+         Dbg.log ("TunzFocus", "routing changed: routed=${routedDeviceStr ()}")
+      }, Handler (Looper.getMainLooper ()))
    // all our mp3 files sit flat in /Music/tunz, rating suffix in filename
       path = Environment.getExternalStorageDirectory ().toString () +
                                                                    "/Music/tunz"
@@ -790,7 +796,7 @@ class MusicService: Service ()
          Dbg.log ("TunzFocus",
                   "onAudioFocusChange: $name isPlaying=${mplay?.isPlaying} " +
                   "btA2dp=${isBtA2dpConnected ()} mode=${am.mode} " +
-                  "pos=${mplay?.currentPosition}")
+                  "pos=${mplay?.currentPosition} routed=${routedDeviceStr ()}")
       // "Hey Google, skip" can call next()'s mplay.start() while
       // Assistant still holds focus for its own SCO listen/response - if
       // the BT stack doesn't cleanly hand A2DP back afterwards, mplay
@@ -806,12 +812,15 @@ class MusicService: Service ()
             mplay?.pause ()
             mplay?.seekTo (posBefore)
             mplay?.start ()
-            Dbg.log ("TunzFocus", "GAIN: restart kick, pos=$posBefore")
+            Dbg.log ("TunzFocus",
+                     "GAIN: restart kick, pos=$posBefore " +
+                     "routed=${routedDeviceStr ()}")
             focusGainCheckHandler.postDelayed ({
                Dbg.log ("TunzFocus",
                         "GAIN: pos check +1500ms pos=" +
                         "${mplay?.currentPosition} " +
-                        "isPlaying=${mplay?.isPlaying}")
+                        "isPlaying=${mplay?.isPlaying} " +
+                        "routed=${routedDeviceStr ()}")
             }, 1500L)
          }
       }
@@ -1169,6 +1178,13 @@ class MusicService: Service ()
       (getSystemService (Context.AUDIO_SERVICE) as AudioManager)
          .getDevices (AudioManager.GET_DEVICES_OUTPUTS)
          .joinToString { "${it.type}:${it.productName}" }
+
+// mplay's actual bound output (MediaPlayer implements AudioRouting) -
+// unlike currentPosition, which keeps ticking even if the underlying
+// AudioTrack's writes never reach a real DAC, this says what device
+// we're really attached to right now
+   private fun routedDeviceStr (): String =
+      mplay?.routedDevice?.let { "${it.type}:${it.productName}" } ?: "none"
 
 // getDevices() lags the real disconnect: on every real car-BT-off event
 // seen in tunz_debug.log, the noisy broadcast fired, getDevices() still
