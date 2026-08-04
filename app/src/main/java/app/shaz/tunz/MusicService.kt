@@ -22,12 +22,15 @@ import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.os.Binder
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.ResultReceiver
 import android.os.SystemClock
 import android.support.v4.media.MediaMetadataCompat
+import android.support.v4.media.RatingCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
@@ -160,6 +163,7 @@ class MusicService: Service ()
    private var castQueueLoadPending = false
    private var reconnectAttempts = 0
    private var noisyPauseGuard = false
+   private var btReconnectedSinceNoisy = false
    private val reconnectHandler = Handler (Looper.getMainLooper ())
    private val btWatchdogHandler = Handler (Looper.getMainLooper ())
    private val castQueueLoadHandler = Handler (Looper.getMainLooper ())
@@ -171,15 +175,21 @@ class MusicService: Service ()
    private val intentFilter = IntentFilter (
       AudioManager.ACTION_AUDIO_BECOMING_NOISY)
 
-// observability only - neither of these reacts to anything, they just log
-// so we can see what's happening when "Hey Google, skip" (heard by the
-// phone itself, not a cast device) goes weird
+// audioFocusListener is observability only - it just logs so we can see
+// what's happening when "Hey Google, skip" (heard by the phone itself,
+// not a cast device) goes weird. audioDeviceCallback also logs, but its
+// onAudioDevicesAdded additionally arms btReconnectedSinceNoisy - see the
+// NOTE above startBtResumeWatchdog() for why a real re-add event (not a
+// getDevices() snapshot) is what the watchdog needs to trust
    private var audioFocusListener: AudioManager.OnAudioFocusChangeListener?
       = null
    private val audioDeviceCallback = object: AudioDeviceCallback ()
    {  override fun onAudioDevicesAdded (devices: Array<out AudioDeviceInfo>)
       {  devices.filter { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP }
-            .forEach { Dbg.log ("TunzBT", "device added: ${it.productName}") }
+            .forEach {
+               Dbg.log ("TunzBT", "device added: ${it.productName}")
+               btReconnectedSinceNoisy = true
+            }
       }
       override fun onAudioDevicesRemoved (
          devices: Array<out AudioDeviceInfo>)
@@ -717,6 +727,43 @@ class MusicService: Service ()
 
             override fun onSkipToPrevious ()
             {  Dbg.log ("TunzSkip", "onSkipToPrevious") }
+
+            override fun onSeekTo (pos: Long)
+            {  Dbg.log ("TunzSkip", "onSeekTo pos=$pos") }
+
+            override fun onFastForward ()
+            {  Dbg.log ("TunzSkip", "onFastForward") }
+
+            override fun onRewind ()
+            {  Dbg.log ("TunzSkip", "onRewind") }
+
+            override fun onSetRating (rating: RatingCompat)
+            {  Dbg.log ("TunzSkip", "onSetRating rating=$rating") }
+
+            override fun onCustomAction (action: String, extras: Bundle?)
+            {  Dbg.log ("TunzSkip", "onCustomAction action=$action " +
+                        "extras=$extras") }
+
+            override fun onPlayFromSearch (query: String?, extras: Bundle?)
+            {  Dbg.log ("TunzSkip", "onPlayFromSearch query=$query " +
+                        "extras=$extras") }
+
+            override fun onPlayFromMediaId (mediaId: String?,
+                                             extras: Bundle?)
+            {  Dbg.log ("TunzSkip", "onPlayFromMediaId mediaId=$mediaId " +
+                        "extras=$extras") }
+
+            override fun onPlayFromUri (uri: Uri?, extras: Bundle?)
+            {  Dbg.log ("TunzSkip", "onPlayFromUri uri=$uri " +
+                        "extras=$extras") }
+
+            override fun onPrepare ()
+            {  Dbg.log ("TunzSkip", "onPrepare") }
+
+            override fun onCommand (command: String, args: Bundle?,
+                                     cb: ResultReceiver?)
+            {  Dbg.log ("TunzSkip", "onCommand command=$command " +
+                        "args=$args") }
          })
          isActive = true
       }
@@ -1081,6 +1128,7 @@ class MusicService: Service ()
 // guard tells onPause() "this pause is mine, don't cancel."
    private fun handleNoisyPause ()
    {  noisyPauseGuard = true
+      btReconnectedSinceNoisy = false
       Dbg.log ("TunzSkip", "handleNoisyPause: pausing, arming watchdog guard")
       mediaSession.controller.transportControls.pause ()
       startBtResumeWatchdog ()
@@ -1096,6 +1144,15 @@ class MusicService: Service ()
          .getDevices (AudioManager.GET_DEVICES_OUTPUTS)
          .joinToString { "${it.type}:${it.productName}" }
 
+// getDevices() lags the real disconnect: on every real car-BT-off event
+// seen in tunz_debug.log, the noisy broadcast fired, getDevices() still
+// showed the A2DP device connected for another 500ms-2s, and only then
+// did onAudioDevicesRemoved() actually fire. Polling isBtA2dpConnected()
+// on a fixed timer reads that stale snapshot and "resumes" playback right
+// as the car is disconnecting - which is what made the app start blaring
+// audio at the exact moment the car turned off. Waiting on
+// btReconnectedSinceNoisy instead means "a real add event happened after
+// we armed," which can't be stale the same way.
    private fun startBtResumeWatchdog ()
    {  btWatchdogHandler.removeCallbacksAndMessages (null)
      val deadline = SystemClock.elapsedRealtime () + BT_WATCHDOG_TIMEOUT_MS
@@ -1104,7 +1161,7 @@ class MusicService: Service ()
                "poll=${BT_WATCHDOG_POLL_MS}ms")
       fun poll ()
       {  val remaining = deadline - SystemClock.elapsedRealtime ()
-         if (isBtA2dpConnected ()) {
+         if (btReconnectedSinceNoisy) {
             Dbg.log ("TunzSkip",
                      "bt watchdog: route back, resuming " +
                      "(remaining=${remaining}ms)")
