@@ -71,6 +71,11 @@ const val NOTIF_ID          = 1
 const val BT_WATCHDOG_POLL_MS    = 500L
 const val BT_WATCHDOG_TIMEOUT_MS = 5000L
 const val CAST_QUEUE_LOAD_DEBOUNCE_MS = 400L
+// a natural end-of-track always reports streamPosition=0 in the
+// LOADING status right before the queue item changes - any interrupted
+// (skipped) item still shows its mid-song position there. threshold
+// gives slack for jitter, real gap observed is 0 vs tens of thousands
+const val CAST_SKIP_POS_THRESHOLD_MS = 1500L
 
 
 object Dbg
@@ -160,6 +165,8 @@ class MusicService: Service ()
    private var lastCastQueueSize = -1
    private var lastAdvancedItemId = -1
    private var castSkipInFlight = false
+   private var castAdvanceWasSkip = false
+   private var castPreAdvancePos = 0L
    private var castQueueLoadPending = false
    private var reconnectAttempts = 0
    private var noisyPauseGuard = false
@@ -332,6 +339,8 @@ class MusicService: Service ()
             if (r.status.isSuccess) {
                lastAdvancedItemId = -1
                castSkipInFlight = false
+               castAdvanceWasSkip = false
+               castPreAdvancePos = 0L
             }
             else  Dbg.log ("TunzCast", "queueLoad failed: " +
                "${r.status.statusCode} ${r.status.statusMessage}")
@@ -344,9 +353,12 @@ class MusicService: Service ()
    // last one we knew about - happens whether we asked it to (queueNext()
    // below, from a button/phone-heard "skip") or the cast device did it on
    // its own ("Hey Google, skip" spoken to the speaker itself, or the
-   // current track just finishing). either way this is the one place that
-   // keeps play/ppos/song/done in sync with what's actually on the
-   // receiver, and keeps a "next" item queued for the round after this one.
+   // current track just finishing). this is the one place that keeps
+   // play/ppos/song/done in sync with what's actually on the receiver,
+   // and keeps a "next" item queued for the round after this one. whether
+   // it counts as a skip (vs a natural finish) comes from either
+   // castAdvanceWasSkip (we asked for it) or castPreAdvancePos (the
+   // receiver cut something off on its own - see onStatusUpdated above)
    // keyed off itemId rather than queue position: the queue is never
    // pruned (see queueAppendItem below, no matching remove) so "current"
    // drifts to a higher index every skip - position was never a reliable
@@ -369,8 +381,14 @@ class MusicService: Service ()
       if (curId == lastAdvancedItemId)  return
       lastAdvancedItemId = curId
       castSkipInFlight = false
-      Dbg.log ("TunzCast", "receiver advanced to queue item $curId")
-      advanceLocal ()
+     val wasSkip = castAdvanceWasSkip ||
+                   castPreAdvancePos > CAST_SKIP_POS_THRESHOLD_MS
+      castAdvanceWasSkip = false
+      castPreAdvancePos = 0L
+      Dbg.log ("TunzCast",
+               "receiver advanced to queue item $curId" +
+               (if (wasSkip)  " (skip)" else ""))
+      advanceLocal (wasSkip)
       if (ppos >= play.size)  return
       song = play [ppos]
       loadAlbumArt ()
@@ -395,6 +413,19 @@ class MusicService: Service ()
       castCb = object : RemoteMediaClient.Callback ()
       {  override fun onStatusUpdated ()
          { val ms = castSession?.remoteMediaClient?.mediaStatus ?: return
+            Dbg.log ("TunzCast",
+               "status: state=${ms.playerState} idle=${ms.idleReason} " +
+               "curId=${ms.currentItemId} qSize=${ms.queueItems?.size} " +
+               "pos=${ms.streamPosition}")
+         // a natural finish reports pos=0 here; an interrupted (skipped)
+         // item - whether from our own queueNext() or "Hey Google, skip"
+         // spoken straight to the receiver - still shows its mid-song
+         // position. grab it here, before curId flips, so
+         // handleCastQueueAdvance() below can use it to catch skips it
+         // has no other way of seeing
+            if (ms.playerState == MediaStatus.PLAYER_STATE_LOADING &&
+                ms.currentItemId == lastAdvancedItemId)
+               castPreAdvancePos = ms.streamPosition
             updateMediaSession ()
             handleCastQueueAdvance (ms)
             if (ms.playerState == MediaStatus.PLAYER_STATE_IDLE) {
@@ -711,7 +742,7 @@ class MusicService: Service ()
 
             override fun onSkipToNext ()
             {  Dbg.log ("TunzSkip", "onSkipToNext")
-               next ()
+               next (skipped = true)
             }
 
          // not implemented - logged so an assistant call landing here
@@ -852,7 +883,7 @@ class MusicService: Service ()
       MediaButtonReceiver.handleIntent (mediaSession, intent)
       when (intent?.action) {
          ACTION_PLAY_PAUSE -> togglePlayPause ()
-         ACTION_NEXT       -> next ()
+         ACTION_NEXT       -> next (skipped = true)
       }
       return START_STICKY
    }
@@ -885,12 +916,11 @@ class MusicService: Service ()
       mplay = null
       mediaSession.release ()
 
-   // store our shuf,dir picks n done songs for next time
+   // store our shuf,dir picks for next time - done/skip are already
+   // saved to disk as they happen, no flush needed here
      val e = getSharedPreferences ("prf", MODE_PRIVATE).edit ()
       e.putBoolean   ("shuf", shuf).commit ()
       e.putStringSet ("pick", pick.toSet ()).commit ()
-      try { File ("${File(path).parent}/done.txt").writeText (done.joinToString ("\n")) }
-      catch (ex: Exception) { }
       try {
          CastContext.getSharedInstance (this)
             .sessionManager.removeSessionManagerListener (
@@ -974,6 +1004,7 @@ class MusicService: Service ()
             }.toMutableList ()
          if (buckets.isEmpty ()) {
             done.clear ()
+            saveDone ()
             pick.forEach { p ->
                mp3.find { it.dir == p }?.fn
                   ?.shuffled ()
@@ -1023,18 +1054,40 @@ class MusicService: Service ()
    }
 
 
-   private fun advanceLocal (): Int
+   private fun saveDone ()
+   // mirrors 'done' to disk right away so a mid-rotation process kill
+   // doesn't lose which songs we've already heard this cycle
+   {  try {
+         File ("${File(path).parent}/done.txt").writeText (
+                                                   done.joinToString ("\n"))
+      }
+      catch (e: Exception) { }
+   }
+
+
+   private fun logSkip (name: String)
+   // append-only record of explicitly skipped songs, separate from done
+   {  try {
+         File ("${File(path).parent}/skip.txt").appendText ("$name\n")
+      }
+      catch (e: Exception) { }
+   }
+
+
+   private fun advanceLocal (skipped: Boolean = false): Int
    // shared bookkeeping for a sequential (row==-1) advance: mark the
    // current song done and drop it from play. doesn't touch mplay/cast -
    // callers decide what (if anything) to load next
    { val removedPos = ppos
       done.add (song)
+      saveDone ()
+      if (skipped)  logSkip (song)
       play.removeAt (ppos)
       return removedPos
    }
 
 
-   fun next (row: Int = -1)
+   fun next (row: Int = -1, skipped: Boolean = false)
    // row set if song table got doubleclicked.  else itsa neeext
    {  Dbg.log ("TunzSkip",
                "next enter row=$row ppos=$ppos playSize=${play.size}")
@@ -1060,6 +1113,7 @@ class MusicService: Service ()
       // of skipping, not a playback failure, so tell handleHttpStreamError
       // to ignore it til handleCastQueueAdvance() confirms the skip landed
          castSkipInFlight = true
+         castAdvanceWasSkip = skipped
          castSession?.remoteMediaClient?.queueNext (null)?.setResultCallback {
             r ->
             if (! r.status.isSuccess) {
@@ -1073,9 +1127,14 @@ class MusicService: Service ()
       mplay?.stop ()
       mplay?.reset ()
      val removedPos: Int
-      if (row == -1)  removedPos = advanceLocal ()
+      if (row == -1)  removedPos = advanceLocal (skipped)
       else {
          removedPos = -1
+      // picking a different song off the list is itself a skip of
+      // whatever was playing - unlike advanceLocal() this doesn't drop
+      // the old song from play/done, it's still eligible to come up
+      // again this rotation
+         if (song.isNotEmpty ())  logSkip (song)
          ppos = row
       }
       if (ppos < play.size) {
