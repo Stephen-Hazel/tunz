@@ -31,6 +31,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.android.gms.cast.framework.CastButtonFactory
 import com.google.android.gms.cast.framework.CastContext
+import com.google.android.material.color.MaterialColors
 import com.google.android.material.snackbar.Snackbar
 import app.shaz.tunz.databinding.ActivityMainBinding
 import app.shaz.tunz.databinding.DialogRateBinding
@@ -154,7 +155,7 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
             tr.isFocusableInTouchMode = true
             if (id == ppos) {
                tr.requestFocus ()
-               tr.setBackgroundColor (0xFF3848AF.toInt ())
+               tr.setBackgroundColor (0xFF7986CB.toInt ())
                selRow = tr
             }
             tr.id = id++
@@ -191,7 +192,7 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
             selRow?.setBackgroundColor (Color.TRANSPARENT)
          }
         val tr = b.loTbl.getChildAt (newPpos) ?: return@runOnUiThread
-         tr.setBackgroundColor (0xFF3848AF.toInt ())
+         tr.setBackgroundColor (0xFF7986CB.toInt ())
          tr.requestFocus ()
          selRow = tr as? TableRow
          rateDialog?.dismiss ()
@@ -249,6 +250,8 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
                               cur: String)
    {  val s = svc ?: return
       row.removeAllViews ()
+      val fg = MaterialColors.getColor (
+         row, android.R.attr.textColorPrimary, Color.BLACK)
       ratings.forEach { r ->
         val tv = TextView (this)
          tv.text = r
@@ -260,7 +263,7 @@ class MainActivity: AppCompatActivity (), PlaybackCallback
             tv.isFocusable = false
          }
          else {
-            tv.setTextColor (Color.WHITE)
+            tv.setTextColor (fg)
             tv.isClickable = true
             tv.isFocusable = true
             tv.setOnClickListener {
